@@ -1,9 +1,9 @@
 import pyodbc
 conn = pyodbc.connect(
     "DRIVER={ODBC Driver 17 for SQL Server};"
-    "SERVER=115.124.106.101;"
-    "UID=jmdtrans;"
-    "PWD=St1234567@;"
+    "SERVER=YOUR_SERVER;"
+    "UID=YOUR_USER;"
+    "PWD=YOUR_PASSWORD;"
     "TrustServerCertificate=yes;"
 )
 cur = conn.cursor()
