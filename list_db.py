@@ -1,9 +1,20 @@
+import os
 import pyodbc
+from dotenv import load_dotenv
+
+load_dotenv()
+
+SERVER   = os.getenv("DB_SERVER", "192.168.1.50")
+PORT     = os.getenv("DB_PORT", "1433")
+USERNAME = os.getenv("DB_USER")
+PASSWORD = os.getenv("DB_PASSWORD")
+DRIVER   = os.getenv("DB_DRIVER", "ODBC Driver 17 for SQL Server")
+
 conn = pyodbc.connect(
-    "DRIVER={ODBC Driver 17 for SQL Server};"
-    "SERVER=YOUR_SERVER;"
-    "UID=YOUR_USER;"
-    "PWD=YOUR_PASSWORD;"
+    f"DRIVER={{{DRIVER}}};"
+    f"SERVER={SERVER},{PORT};"
+    f"UID={USERNAME};"
+    f"PWD={PASSWORD};"
     "TrustServerCertificate=yes;"
 )
 cur = conn.cursor()
