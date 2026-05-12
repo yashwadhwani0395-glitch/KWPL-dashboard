@@ -1,25 +1,37 @@
 import os
-import pyodbc
+import pymssql
 import pandas as pd
 from dotenv import load_dotenv
 
 load_dotenv()
 
-CONN_STR = (
-    f"DRIVER={{{os.getenv('DB_DRIVER', 'ODBC Driver 18 for SQL Server')}}};"
-    f"SERVER={os.getenv('DB_SERVER')};"
-    f"DATABASE={os.getenv('DB_NAME')};"
-    f"UID={os.getenv('DB_USER')};"
-    f"PWD={os.getenv('DB_PASSWORD')};"
-    f"TrustServerCertificate=yes;"
-)
 
-SALES_TYPES = (9,13,18,19,23,27,34,35,38,39,40,41,44,47,49,50,51,52,53)
-PURCHASE_TYPES = (11,20,22,30,32,33,36,42,45,46,48,54)
+def _cfg(key: str, default: str = "") -> str:
+    """Read config from st.secrets (Streamlit Cloud) or .env (local)."""
+    try:
+        import streamlit as st
+        return st.secrets.get(key, os.getenv(key, default))
+    except Exception:
+        return os.getenv(key, default)
 
 
 def get_connection():
-    return pyodbc.connect(CONN_STR)
+    server_raw = _cfg("DB_SERVER", "localhost")
+    # Support "host,port" format used in pyodbc connection strings
+    if "," in server_raw:
+        host, port = server_raw.split(",", 1)
+    else:
+        host, port = server_raw, "1433"
+
+    return pymssql.connect(
+        server=host.strip(),
+        port=port.strip(),
+        user=_cfg("DB_USER"),
+        password=_cfg("DB_PASSWORD"),
+        database=_cfg("DB_NAME"),
+        tds_version="7.4",
+        login_timeout=15,
+    )
 
 
 def query(sql: str, params=None) -> pd.DataFrame:
