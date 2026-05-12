@@ -125,7 +125,7 @@ with tab_overview:
             fig.add_trace(go.Scatter(name='Purchases', x=df_trend['month'], y=df_trend['purchases'],
                                      fill='tozeroy', line_color='#E84855'))
             fig.update_layout(margin=dict(t=10,b=10), yaxis_title='₹')
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(fig, use_container_width=True, key="chart_1")
 
     with col_r:
         st.subheader("Sales by Category")
@@ -143,7 +143,7 @@ with tab_overview:
             fig = px.pie(df_cat, names='category', values='sales',
                          color_discrete_sequence=px.colors.qualitative.Set2)
             fig.update_layout(margin=dict(t=10,b=10))
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(fig, use_container_width=True, key="chart_2")
 
 
 # ════════════════════════════════════════════════════════════════════════════
@@ -192,7 +192,7 @@ with tab_sales:
                          labels={'month':'Month','sales':'Sales (₹)'},
                          color_discrete_sequence=['#7B2D8B'])
             fig.update_layout(margin=dict(t=10,b=10))
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(fig, use_container_width=True, key="chart_3")
 
     with col_r:
         st.subheader("Sales by Category")
@@ -208,7 +208,7 @@ with tab_sales:
             fig = px.pie(df_cat, names='category', values='sales',
                          color_discrete_sequence=px.colors.qualitative.Set2)
             fig.update_layout(margin=dict(t=10,b=10))
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(fig, use_container_width=True, key="chart_4")
 
     # Daily last 30 days
     st.subheader("Daily Sales — Last 30 Days")
@@ -227,7 +227,7 @@ with tab_sales:
                      labels={'sale_date':'Date','sales':'Sales (₹)'},
                      color_discrete_sequence=['#2E86AB'])
         fig.update_layout(margin=dict(t=10,b=10))
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, use_container_width=True, key="chart_5")
 
     st.divider()
 
@@ -255,7 +255,7 @@ with tab_sales:
                          color='sales', color_continuous_scale='Purples')
             fig.update_layout(yaxis={'categoryorder':'total ascending'},
                               margin=dict(t=10,b=10), coloraxis_showscale=False)
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(fig, use_container_width=True, key="chart_6")
 
     with col_r:
         st.subheader("Salesman Performance")
@@ -278,7 +278,7 @@ with tab_sales:
                          color='sales', color_continuous_scale='Oranges')
             fig.update_layout(margin=dict(t=10,b=10), coloraxis_showscale=False,
                               xaxis_tickangle=-30)
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(fig, use_container_width=True, key="chart_7")
 
     st.divider()
 
@@ -302,7 +302,7 @@ with tab_sales:
                          color='sales', color_continuous_scale='Teal')
             fig.update_layout(margin=dict(t=10,b=10), coloraxis_showscale=False,
                               xaxis_tickangle=-45)
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(fig, use_container_width=True, key="chart_8")
     with col_r:
         if not df_brand.empty:
             fig = px.bar(df_brand.sort_values('bottles', ascending=False),
@@ -311,7 +311,7 @@ with tab_sales:
                          color='bottles', color_continuous_scale='Blues')
             fig.update_layout(margin=dict(t=10,b=10), coloraxis_showscale=False,
                               xaxis_tickangle=-45)
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(fig, use_container_width=True, key="chart_9")
 
 
 # ════════════════════════════════════════════════════════════════════════════
@@ -356,7 +356,7 @@ with tab_purchases:
                          labels={'month':'Month','purchases':'Purchases (₹)'},
                          color_discrete_sequence=['#E84855'])
             fig.update_layout(margin=dict(t=10,b=10))
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(fig, use_container_width=True, key="chart_10")
 
     with col_r:
         st.subheader("Purchases by Category")
@@ -372,7 +372,7 @@ with tab_purchases:
             fig = px.pie(df_pcat, names='category', values='purchases',
                          color_discrete_sequence=px.colors.qualitative.Pastel)
             fig.update_layout(margin=dict(t=10,b=10))
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(fig, use_container_width=True, key="chart_11")
 
     st.divider()
     st.subheader("Current Stock Position")
@@ -407,7 +407,7 @@ with tab_purchases:
                          color='stock_value', color_continuous_scale='Greens')
             fig.update_layout(margin=dict(t=10,b=10), coloraxis_showscale=False,
                               xaxis_tickangle=-45)
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(fig, use_container_width=True, key="chart_12")
 
         with col_r:
             st.subheader("Top 10 Items by Quantity")
@@ -417,7 +417,7 @@ with tab_purchases:
                          color='bottles', color_continuous_scale='Teal')
             fig.update_layout(yaxis={'categoryorder':'total ascending'},
                               margin=dict(t=10,b=10), coloraxis_showscale=False)
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(fig, use_container_width=True, key="chart_13")
 
         st.subheader("Full Stock List")
         df_disp = df_stock.copy()
@@ -488,7 +488,7 @@ with tab_debtors:
             fig = px.pie(buckets, names='Bucket', values='Amount',
                          color_discrete_sequence=['#28A745','#FFC107','#FF851B','#E84855'])
             fig.update_layout(margin=dict(t=10,b=10))
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(fig, use_container_width=True, key="chart_14")
 
         with col_r:
             st.subheader("Top 15 Debtors")
@@ -498,7 +498,7 @@ with tab_debtors:
                          color='outstanding', color_continuous_scale='Reds')
             fig.update_layout(yaxis={'categoryorder':'total ascending'},
                               margin=dict(t=10,b=10), coloraxis_showscale=False)
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(fig, use_container_width=True, key="chart_15")
 
         st.subheader("Debtor Details")
         df_disp = df_age.copy()
@@ -560,7 +560,7 @@ with tab_cashflow:
             fig.add_trace(go.Bar(name='Payments', x=df_cf['month'], y=df_cf['payments'],
                                  marker_color='#E84855'))
             fig.update_layout(barmode='group', margin=dict(t=10,b=10), yaxis_title='₹')
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(fig, use_container_width=True, key="chart_16")
 
     with col_r:
         st.subheader("Expenses Breakdown")
@@ -579,7 +579,7 @@ with tab_cashflow:
             fig = px.pie(df_exp.head(10), names='expense_head', values='amount',
                          color_discrete_sequence=px.colors.qualitative.Set3)
             fig.update_layout(margin=dict(t=10,b=10))
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(fig, use_container_width=True, key="chart_17")
 
     # Return cheques
     st.divider()
