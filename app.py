@@ -130,13 +130,13 @@ with tab_overview:
     with col_r:
         st.subheader("Sales by Category")
         df_cat = query(f"""
-            SELECT t.TransTypeDescription AS category, SUM(i.TotalAmount) AS sales
+            SELECT t.TransTypeName AS category, SUM(i.TotalAmount) AS sales
             FROM TrVocHead h
             JOIN TrVocItem i ON i.TransTypeID=h.TransTypeID AND i.VoucherNo=h.VoucherNo
             JOIN MsTransType t ON t.id_key=h.TransTypeID
             WHERE h.TransTypeID IN ({SALES_IN})
               {NOT_CANCELLED} {NOT_FREE}
-            GROUP BY t.TransTypeDescription
+            GROUP BY t.TransTypeName
             ORDER BY sales DESC
         """)
         if not df_cat.empty:
@@ -197,12 +197,12 @@ with tab_sales:
     with col_r:
         st.subheader("Sales by Category")
         df_cat = query(f"""
-            SELECT t.TransTypeDescription AS category, SUM(i.TotalAmount) AS sales
+            SELECT t.TransTypeName AS category, SUM(i.TotalAmount) AS sales
             FROM TrVocHead h
             JOIN TrVocItem i ON i.TransTypeID=h.TransTypeID AND i.VoucherNo=h.VoucherNo
             JOIN MsTransType t ON t.id_key=h.TransTypeID
             WHERE h.TransTypeID IN ({SALES_IN}) {NOT_CANCELLED} {NOT_FREE}
-            GROUP BY t.TransTypeDescription ORDER BY sales DESC
+            GROUP BY t.TransTypeName ORDER BY sales DESC
         """)
         if not df_cat.empty:
             fig = px.pie(df_cat, names='category', values='sales',
@@ -361,12 +361,12 @@ with tab_purchases:
     with col_r:
         st.subheader("Purchases by Category")
         df_pcat = query(f"""
-            SELECT t.TransTypeDescription AS category, SUM(i.TotalAmount) AS purchases
+            SELECT t.TransTypeName AS category, SUM(i.TotalAmount) AS purchases
             FROM TrVocHead h
             JOIN TrVocItem i ON i.TransTypeID=h.TransTypeID AND i.VoucherNo=h.VoucherNo
             JOIN MsTransType t ON t.id_key=h.TransTypeID
             WHERE h.TransTypeID IN ({PURCHASE_IN}) {NOT_CANCELLED} {NOT_FREE}
-            GROUP BY t.TransTypeDescription ORDER BY purchases DESC
+            GROUP BY t.TransTypeName ORDER BY purchases DESC
         """)
         if not df_pcat.empty:
             fig = px.pie(df_pcat, names='category', values='purchases',
@@ -518,12 +518,12 @@ with tab_cashflow:
 
     cf_kpi = query(f"""
         SELECT
-            SUM(CASE WHEN t.TransTypeCode IN ('BR','CR') THEN d.Amount ELSE 0 END) AS total_receipts,
-            SUM(CASE WHEN t.TransTypeCode IN ('BP','CE') THEN d.Amount ELSE 0 END) AS total_payments
+            SUM(CASE WHEN t.ShortName IN ('BR','CR') THEN d.Amount ELSE 0 END) AS total_receipts,
+            SUM(CASE WHEN t.ShortName IN ('BP','CE') THEN d.Amount ELSE 0 END) AS total_payments
         FROM TrVocDetail d
         JOIN TrVocHead h ON h.TransTypeID=d.TransTypeID AND h.VoucherNo=d.VoucherNo
         JOIN MsTransType t ON t.id_key=h.TransTypeID
-        WHERE t.TransTypeCode IN ('BR','CR','BP','CE')
+        WHERE t.ShortName IN ('BR','CR','BP','CE')
           {NOT_CANCELLED}
     """)
 
@@ -542,12 +542,12 @@ with tab_cashflow:
         st.subheader("Monthly Cash Flow")
         df_cf = query(f"""
             SELECT YEAR(h.VoucherDate) AS yr, MONTH(h.VoucherDate) AS mo,
-                   SUM(CASE WHEN t.TransTypeCode IN ('BR','CR') THEN d.Amount ELSE 0 END) AS receipts,
-                   SUM(CASE WHEN t.TransTypeCode IN ('BP','CE') THEN d.Amount ELSE 0 END) AS payments
+                   SUM(CASE WHEN t.ShortName IN ('BR','CR') THEN d.Amount ELSE 0 END) AS receipts,
+                   SUM(CASE WHEN t.ShortName IN ('BP','CE') THEN d.Amount ELSE 0 END) AS payments
             FROM TrVocDetail d
             JOIN TrVocHead h ON h.TransTypeID=d.TransTypeID AND h.VoucherNo=d.VoucherNo
             JOIN MsTransType t ON t.id_key=h.TransTypeID
-            WHERE t.TransTypeCode IN ('BR','CR','BP','CE') {NOT_CANCELLED}
+            WHERE t.ShortName IN ('BR','CR','BP','CE') {NOT_CANCELLED}
             GROUP BY YEAR(h.VoucherDate), MONTH(h.VoucherDate)
             ORDER BY yr, mo
         """)
@@ -569,7 +569,7 @@ with tab_cashflow:
             FROM TrVocDetail d
             JOIN TrVocHead h ON h.TransTypeID=d.TransTypeID AND h.VoucherNo=d.VoucherNo
             JOIN MsAccountHead a ON a.AccHeadID=d.AccHeadID
-            WHERE h.TransTypeID IN (SELECT id_key FROM MsTransType WHERE TransTypeCode IN ('BP','CE'))
+            WHERE h.TransTypeID IN (SELECT id_key FROM MsTransType WHERE ShortName IN ('BP','CE'))
               {NOT_CANCELLED}
               AND d.DrCrIndicator='D'
               AND a.MainHeadType='4'
@@ -595,7 +595,7 @@ with tab_cashflow:
         JOIN TrVocDetail d ON d.TransTypeID=h.TransTypeID AND d.VoucherNo=h.VoucherNo
         JOIN MsPartyMaster p ON p.PartyID=d.PartyID
         JOIN MsTransType t ON t.id_key=h.TransTypeID
-        WHERE t.TransTypeDescription LIKE '%Return%Cheque%'
+        WHERE t.TransTypeName LIKE '%Return%Cheque%'
           {NOT_CANCELLED}
         ORDER BY h.VoucherDate DESC
     """)
