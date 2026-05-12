@@ -99,51 +99,147 @@ with tab_overview:
 
     st.divider()
 
-    col_l, col_r = st.columns(2)
+    # ── Monthly Sales / Collections / Purchases ──────────────────────────────
+    st.subheader("Monthly Trend — Sales, Collections & Purchases")
+    df_trend = query(f"""
+        SELECT
+            YEAR(h.VoucherDate)  AS yr,
+            MONTH(h.VoucherDate) AS mo,
+            SUM(CASE WHEN h.TransTypeID IN ({SALES_IN})    THEN i.TotalAmount ELSE 0 END) AS sales,
+            SUM(CASE WHEN h.TransTypeID IN ({PURCHASE_IN}) THEN i.TotalAmount ELSE 0 END) AS purchases
+        FROM TrVocHead h
+        JOIN TrVocItem i ON i.TransTypeID=h.TransTypeID AND i.VoucherNo=h.VoucherNo
+        WHERE h.TransTypeID IN ({SALES_IN},{PURCHASE_IN})
+          {NOT_CANCELLED} AND i.FreeItemYN<>'Y'
+        GROUP BY YEAR(h.VoucherDate), MONTH(h.VoucherDate)
+        ORDER BY yr, mo
+    """)
+    df_coll = query(f"""
+        SELECT
+            YEAR(h.VoucherDate)  AS yr,
+            MONTH(h.VoucherDate) AS mo,
+            SUM(d.Amount)        AS collections
+        FROM TrVocDetail d
+        JOIN TrVocHead h ON h.TransTypeID=d.TransTypeID AND h.VoucherNo=d.VoucherNo
+        JOIN MsTransType t ON t.id_key=h.TransTypeID
+        WHERE t.ShortName IN ('BR','CR') {NOT_CANCELLED}
+          AND d.DrCrIndicator='C'
+        GROUP BY YEAR(h.VoucherDate), MONTH(h.VoucherDate)
+        ORDER BY yr, mo
+    """)
+    if not df_trend.empty:
+        df_trend['month'] = pd.to_datetime(
+            df_trend['yr'].astype(str)+'-'+df_trend['mo'].astype(str)+'-01')
+        if not df_coll.empty:
+            df_coll['month'] = pd.to_datetime(
+                df_coll['yr'].astype(str)+'-'+df_coll['mo'].astype(str)+'-01')
+            df_trend = df_trend.merge(df_coll[['month','collections']], on='month', how='left').fillna(0)
+        else:
+            df_trend['collections'] = 0
+        fig = go.Figure()
+        fig.add_trace(go.Bar(name='Sales',       x=df_trend['month'], y=df_trend['sales'],
+                             marker_color='#7B2D8B'))
+        fig.add_trace(go.Bar(name='Collections', x=df_trend['month'], y=df_trend['collections'],
+                             marker_color='#28A745'))
+        fig.add_trace(go.Bar(name='Purchases',   x=df_trend['month'], y=df_trend['purchases'],
+                             marker_color='#E84855'))
+        fig.update_layout(barmode='group', margin=dict(t=10,b=10), yaxis_title='₹',
+                          legend=dict(orientation='h', y=1.1))
+        st.plotly_chart(fig, use_container_width=True, key="chart_1")
 
-    with col_l:
-        st.subheader("Monthly Sales vs Purchases")
-        df_trend = query(f"""
-            SELECT
-                YEAR(h.VoucherDate)  AS yr,
-                MONTH(h.VoucherDate) AS mo,
-                SUM(CASE WHEN h.TransTypeID IN ({SALES_IN})    THEN i.TotalAmount ELSE 0 END) AS sales,
-                SUM(CASE WHEN h.TransTypeID IN ({PURCHASE_IN}) THEN i.TotalAmount ELSE 0 END) AS purchases
-            FROM TrVocHead h
-            JOIN TrVocItem i ON i.TransTypeID=h.TransTypeID AND i.VoucherNo=h.VoucherNo
-            WHERE h.TransTypeID IN ({SALES_IN},{PURCHASE_IN})
-              {NOT_CANCELLED} AND i.FreeItemYN<>'Y'
-            GROUP BY YEAR(h.VoucherDate), MONTH(h.VoucherDate)
-            ORDER BY yr, mo
-        """)
-        if not df_trend.empty:
-            df_trend['month'] = pd.to_datetime(
-                df_trend['yr'].astype(str)+'-'+df_trend['mo'].astype(str)+'-01')
-            fig = go.Figure()
-            fig.add_trace(go.Scatter(name='Sales', x=df_trend['month'], y=df_trend['sales'],
-                                     fill='tozeroy', line_color='#7B2D8B'))
-            fig.add_trace(go.Scatter(name='Purchases', x=df_trend['month'], y=df_trend['purchases'],
-                                     fill='tozeroy', line_color='#E84855'))
-            fig.update_layout(margin=dict(t=10,b=10), yaxis_title='₹')
-            st.plotly_chart(fig, use_container_width=True, key="chart_1")
+    st.divider()
 
-    with col_r:
-        st.subheader("Sales by Category")
-        df_cat = query(f"""
-            SELECT t.TransTypeName AS category, SUM(i.TotalAmount) AS sales
+    # ── Company-wise / Brand-wise / Item-wise breakdown ───────────────────────
+    view = st.radio("Breakdown by", ["Company", "Brand", "Item"], horizontal=True)
+
+    if view == "Company":
+        df_co = query(f"""
+            SELECT t.TransTypeName AS label, SUM(i.TotalAmount) AS sales
             FROM TrVocHead h
             JOIN TrVocItem i ON i.TransTypeID=h.TransTypeID AND i.VoucherNo=h.VoucherNo
             JOIN MsTransType t ON t.id_key=h.TransTypeID
-            WHERE h.TransTypeID IN ({SALES_IN})
-              {NOT_CANCELLED} {NOT_FREE}
-            GROUP BY t.TransTypeName
-            ORDER BY sales DESC
+            WHERE h.TransTypeID IN ({SALES_IN}) {NOT_CANCELLED} {NOT_FREE}
+            GROUP BY t.TransTypeName ORDER BY sales DESC
         """)
-        if not df_cat.empty:
-            fig = px.pie(df_cat, names='category', values='sales',
-                         color_discrete_sequence=px.colors.qualitative.Set2)
-            fig.update_layout(margin=dict(t=10,b=10))
-            st.plotly_chart(fig, use_container_width=True, key="chart_2")
+        col_l, col_r = st.columns(2)
+        with col_l:
+            if not df_co.empty:
+                fig = px.pie(df_co, names='label', values='sales',
+                             title='Sales by Company/Category',
+                             color_discrete_sequence=px.colors.qualitative.Set2)
+                fig.update_layout(margin=dict(t=40,b=10))
+                st.plotly_chart(fig, use_container_width=True, key="chart_2")
+        with col_r:
+            if not df_co.empty:
+                fig = px.bar(df_co, x='sales', y='label', orientation='h',
+                             labels={'sales':'Sales (₹)','label':''},
+                             color='sales', color_continuous_scale='Purples')
+                fig.update_layout(yaxis={'categoryorder':'total ascending'},
+                                  margin=dict(t=10,b=10), coloraxis_showscale=False)
+                st.plotly_chart(fig, use_container_width=True, key="chart_3")
+
+    elif view == "Brand":
+        df_br = query(f"""
+            SELECT b.BrandName AS label, SUM(i.TotalAmount) AS sales,
+                   SUM(i.TotalBottleQty) AS bottles
+            FROM TrVocItem i
+            JOIN TrVocHead h ON h.TransTypeID=i.TransTypeID AND h.VoucherNo=i.VoucherNo
+            JOIN MsBrandMaster b ON b.BrandID=i.BrandID
+            WHERE h.TransTypeID IN ({SALES_IN}) {NOT_CANCELLED} {NOT_FREE}
+            GROUP BY b.BrandName ORDER BY sales DESC
+        """)
+        col_l, col_r = st.columns(2)
+        with col_l:
+            if not df_br.empty:
+                fig = px.bar(df_br.head(15), x='label', y='sales',
+                             labels={'label':'Brand','sales':'Sales (₹)'},
+                             color='sales', color_continuous_scale='Teal',
+                             title='Top Brands by Sales Value')
+                fig.update_layout(margin=dict(t=40,b=10), coloraxis_showscale=False,
+                                  xaxis_tickangle=-45)
+                st.plotly_chart(fig, use_container_width=True, key="chart_2")
+        with col_r:
+            if not df_br.empty:
+                fig = px.bar(df_br.head(15).sort_values('bottles', ascending=False),
+                             x='label', y='bottles',
+                             labels={'label':'Brand','bottles':'Bottles Sold'},
+                             color='bottles', color_continuous_scale='Blues',
+                             title='Top Brands by Volume')
+                fig.update_layout(margin=dict(t=40,b=10), coloraxis_showscale=False,
+                                  xaxis_tickangle=-45)
+                st.plotly_chart(fig, use_container_width=True, key="chart_3")
+
+    else:  # Item
+        df_it = query(f"""
+            SELECT TOP 20 m.ItemDescription AS label,
+                   SUM(i.TotalAmount) AS sales,
+                   SUM(i.TotalBottleQty) AS bottles
+            FROM TrVocItem i
+            JOIN TrVocHead h ON h.TransTypeID=i.TransTypeID AND h.VoucherNo=i.VoucherNo
+            JOIN MsItemMaster m ON m.ItemID=i.ItemID
+            WHERE h.TransTypeID IN ({SALES_IN}) {NOT_CANCELLED} {NOT_FREE}
+            GROUP BY m.ItemDescription ORDER BY sales DESC
+        """)
+        col_l, col_r = st.columns(2)
+        with col_l:
+            if not df_it.empty:
+                fig = px.bar(df_it, x='sales', y='label', orientation='h',
+                             labels={'sales':'Sales (₹)','label':''},
+                             color='sales', color_continuous_scale='Oranges',
+                             title='Top 20 Items by Sales Value')
+                fig.update_layout(yaxis={'categoryorder':'total ascending'},
+                                  margin=dict(t=40,b=10), coloraxis_showscale=False)
+                st.plotly_chart(fig, use_container_width=True, key="chart_2")
+        with col_r:
+            if not df_it.empty:
+                fig = px.bar(df_it.sort_values('bottles', ascending=False),
+                             x='bottles', y='label', orientation='h',
+                             labels={'bottles':'Bottles','label':''},
+                             color='bottles', color_continuous_scale='Greens',
+                             title='Top 20 Items by Volume')
+                fig.update_layout(yaxis={'categoryorder':'total ascending'},
+                                  margin=dict(t=40,b=10), coloraxis_showscale=False)
+                st.plotly_chart(fig, use_container_width=True, key="chart_3")
 
 
 # ════════════════════════════════════════════════════════════════════════════
