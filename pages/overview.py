@@ -116,8 +116,9 @@ def render():
         FROM TrVocDetail d
         JOIN TrVocHead h ON h.TransTypeID=d.TransTypeID AND h.VoucherNo=d.VoucherNo
         JOIN MsTransType t ON t.id_key=h.TransTypeID
-        WHERE t.ShortName IN ('BR','CR') {NOT_CANCELLED}
-          AND d.DrCrIndicator='C'
+        WHERE t.ShortName IN ('BR','CR')
+          AND ISNULL(h.Cancelled,'N') <> 'Y'
+          AND d.PartyID IS NOT NULL
           {date_filter}
         GROUP BY YEAR(h.VoucherDate), MONTH(h.VoucherDate)
         ORDER BY yr, mo
