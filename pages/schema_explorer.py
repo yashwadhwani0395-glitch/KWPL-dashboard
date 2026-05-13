@@ -434,6 +434,45 @@ def render():
                 GROUP BY t.ShortName, t.TransTypeName
                 ORDER BY total_dr_amount DESC
             """),
+            ("U — Opening balance tables for D% customers (find missing ₹1.1 Cr gap)", """
+                SELECT 'MsPartyOpeningBalance' AS tbl_check,
+                       COUNT(*) AS rows,
+                       SUM(CASE WHEN DrCrIndicator='D' THEN Amount ELSE 0 END) AS opening_dr,
+                       SUM(CASE WHEN DrCrIndicator='C' THEN Amount ELSE 0 END) AS opening_cr
+                FROM MsPartyOpeningBalance
+                WHERE PartyID LIKE 'D%'
+                UNION ALL
+                SELECT 'MsPartyOpeningBalance_ALL' AS tbl_check,
+                       COUNT(*) AS rows,
+                       SUM(CASE WHEN DrCrIndicator='D' THEN Amount ELSE 0 END) AS opening_dr,
+                       SUM(CASE WHEN DrCrIndicator='C' THEN Amount ELSE 0 END) AS opening_cr
+                FROM MsPartyOpeningBalance
+            """),
+            ("V — Opening balance tables existence check", """
+                SELECT TABLE_NAME
+                FROM INFORMATION_SCHEMA.TABLES
+                WHERE TABLE_TYPE='BASE TABLE'
+                  AND (TABLE_NAME LIKE '%Opening%' OR TABLE_NAME LIKE '%Balance%'
+                       OR TABLE_NAME LIKE '%opening%' OR TABLE_NAME LIKE '%balance%'
+                       OR TABLE_NAME LIKE '%Opening%')
+                ORDER BY TABLE_NAME
+            """),
+            ("W — Net ledger with opening balance included (DR-CR+OB for D% to 31.03.2026)", """
+                SELECT
+                    COUNT(*) AS debtors,
+                    SUM(net_balance) AS total_outstanding
+                FROM (
+                    SELECT d.PartyID,
+                           SUM(CASE WHEN d.DrCrIndicator='D' THEN d.Amount ELSE -d.Amount END) AS net_balance
+                    FROM TrVocDetail d
+                    JOIN TrVocHead h ON h.TransTypeID=d.TransTypeID AND h.VoucherNo=d.VoucherNo
+                    WHERE ISNULL(h.Cancelled,'N') <> 'Y'
+                      AND d.PartyID LIKE 'D%'
+                      AND h.VoucherDate < '2026-04-01'
+                    GROUP BY d.PartyID
+                ) all_parties
+                WHERE net_balance > 0
+            """),
             ]
 
             import io, zipfile
