@@ -27,7 +27,8 @@ def render():
         SELECT SUM(i.TotalAmount) AS value
         FROM TrVocHead h
         JOIN TrVocItem i ON i.TransTypeID=h.TransTypeID AND i.VoucherNo=h.VoucherNo
-        WHERE h.TransTypeID IN ({SALES_IN}) {NOT_CANCELLED} {NOT_FREE}
+        JOIN MsTransType t ON t.id_key=h.TransTypeID
+        WHERE t.ShortName='MS' {NOT_CANCELLED} {NOT_FREE}
     """)
     cogs = query(f"""
         SELECT SUM(i.TotalAmount) AS value
@@ -39,8 +40,10 @@ def render():
         SELECT SUM(d.RemainingAmt) AS value
         FROM TrVocDetail d
         JOIN TrVocHead h ON h.TransTypeID=d.TransTypeID AND h.VoucherNo=d.VoucherNo
-        WHERE h.TransTypeID IN ({SALES_IN}) {NOT_CANCELLED}
+        JOIN MsTransType t ON t.id_key=h.TransTypeID
+        WHERE t.ShortName='MS' {NOT_CANCELLED}
           AND d.DrCrIndicator='D' AND d.RemainingAmt > 0
+          AND d.PartyID IS NOT NULL
     """)
     payables = query(f"""
         SELECT SUM(d.RemainingAmt) AS value
@@ -59,7 +62,7 @@ def render():
             FROM TrVocItem vi
             JOIN TrVocHead h ON h.TransTypeID=vi.TransTypeID AND h.VoucherNo=vi.VoucherNo
             WHERE h.TransTypeID IN ({PURCHASE_IN},{SALES_IN})
-              {NOT_CANCELLED} AND vi.FreeItemYN <> 'Y'
+              {NOT_CANCELLED} AND ISNULL(vi.FreeItemYN,'N') <> 'Y'
             GROUP BY vi.ItemID
         ) sub
         JOIN MsItemMaster m ON m.ItemID = sub.ItemID
@@ -110,7 +113,7 @@ def render():
         FROM TrVocHead h
         JOIN TrVocItem i ON i.TransTypeID=h.TransTypeID AND i.VoucherNo=h.VoucherNo
         WHERE h.TransTypeID IN ({SALES_IN},{PURCHASE_IN})
-          {NOT_CANCELLED} {NOT_FREE}
+          {NOT_CANCELLED} AND ISNULL(i.FreeItemYN,'N') <> 'Y'
         GROUP BY YEAR(h.VoucherDate), MONTH(h.VoucherDate)
         ORDER BY yr, mo
     """)
@@ -161,8 +164,10 @@ def render():
         FROM TrVocDetail d
         JOIN TrVocHead h ON h.TransTypeID=d.TransTypeID AND h.VoucherNo=d.VoucherNo
         JOIN MsPartyMaster p ON p.PartyID=d.PartyID
-        WHERE h.TransTypeID IN ({SALES_IN}) {NOT_CANCELLED}
+        JOIN MsTransType t ON t.id_key=h.TransTypeID
+        WHERE t.ShortName='MS' {NOT_CANCELLED}
           AND d.DrCrIndicator='D' AND d.RemainingAmt > 0
+          AND d.PartyID IS NOT NULL
         GROUP BY p.PartyName ORDER BY receivable DESC
     """)
     df_pay = query(f"""

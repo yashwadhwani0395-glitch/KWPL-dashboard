@@ -1,6 +1,6 @@
 import streamlit as st
 from db import query
-from config import SALES_IN, NOT_CANCELLED, NOT_FREE, COLORS
+from config import NOT_CANCELLED, NOT_FREE, COLORS
 from utils import fmt_inr, fmt_qty, month_col, fmt_date
 from components.kpi_cards import kpi_row
 from components.charts import bar_chart, pie_chart, line_chart
@@ -10,21 +10,26 @@ def render():
     st.header("Sales")
 
     # ── KPIs ─────────────────────────────────────────────────────────────────
-    kpi = query(f"""
-        SELECT
-            COUNT(DISTINCT h.VoucherNo) AS invoices,
-            SUM(i.TotalAmount)          AS sales,
-            SUM(i.TotalBottleQty)       AS bottles,
-            SUM(i.CaseQty)              AS cases
+    sales_amt = query(f"""
+        SELECT SUM(i.TotalAmount) AS sales,
+               SUM(i.TotalBottleQty) AS bottles,
+               SUM(i.CaseQty) AS cases
         FROM TrVocHead h
         JOIN TrVocItem i ON i.TransTypeID=h.TransTypeID AND i.VoucherNo=h.VoucherNo
-        WHERE h.TransTypeID IN ({SALES_IN}) {NOT_CANCELLED} {NOT_FREE}
+        JOIN MsTransType t ON t.id_key=h.TransTypeID
+        WHERE t.ShortName='MS' {NOT_CANCELLED} {NOT_FREE}
+    """)
+    inv_count = query(f"""
+        SELECT COUNT(*) AS invoices
+        FROM TrVocHead h
+        JOIN MsTransType t ON t.id_key=h.TransTypeID
+        WHERE t.ShortName='MS' {NOT_CANCELLED}
     """)
     kpi_row([
-        {"label": "Invoices",     "value": kpi["invoices"][0], "fmt": "qty"},
-        {"label": "Total Sales",  "value": kpi["sales"][0],    "fmt": "inr"},
-        {"label": "Bottles Sold", "value": kpi["bottles"][0],  "fmt": "qty"},
-        {"label": "Cases Sold",   "value": kpi["cases"][0],    "fmt": "qty"},
+        {"label": "Invoices",     "value": inv_count["invoices"][0], "fmt": "qty"},
+        {"label": "Total Sales",  "value": sales_amt["sales"][0],    "fmt": "inr"},
+        {"label": "Bottles Sold", "value": sales_amt["bottles"][0],  "fmt": "qty"},
+        {"label": "Cases Sold",   "value": sales_amt["cases"][0],    "fmt": "qty"},
     ])
 
     st.divider()
@@ -39,7 +44,8 @@ def render():
                    SUM(i.TotalAmount) AS sales
             FROM TrVocHead h
             JOIN TrVocItem i ON i.TransTypeID=h.TransTypeID AND i.VoucherNo=h.VoucherNo
-            WHERE h.TransTypeID IN ({SALES_IN}) {NOT_CANCELLED} {NOT_FREE}
+            JOIN MsTransType t ON t.id_key=h.TransTypeID
+            WHERE t.ShortName='MS' {NOT_CANCELLED} {NOT_FREE}
             GROUP BY YEAR(h.VoucherDate), MONTH(h.VoucherDate) ORDER BY yr, mo
         """)
         if not df_m.empty:
@@ -55,7 +61,7 @@ def render():
             FROM TrVocHead h
             JOIN TrVocItem i ON i.TransTypeID=h.TransTypeID AND i.VoucherNo=h.VoucherNo
             JOIN MsTransType t ON t.id_key=h.TransTypeID
-            WHERE h.TransTypeID IN ({SALES_IN}) {NOT_CANCELLED} {NOT_FREE}
+            WHERE t.ShortName='MS' {NOT_CANCELLED} {NOT_FREE}
             GROUP BY t.TransTypeName ORDER BY sales DESC
         """)
         if not df_cat.empty:
@@ -66,11 +72,11 @@ def render():
     st.subheader("Daily Sales — Last 30 Days")
     df_d = query(f"""
         SELECT CAST(h.VoucherDate AS DATE) AS sale_date,
-               SUM(i.TotalAmount) AS sales,
-               COUNT(DISTINCT h.VoucherNo) AS invoices
+               SUM(i.TotalAmount) AS sales
         FROM TrVocHead h
         JOIN TrVocItem i ON i.TransTypeID=h.TransTypeID AND i.VoucherNo=h.VoucherNo
-        WHERE h.TransTypeID IN ({SALES_IN}) {NOT_CANCELLED} {NOT_FREE}
+        JOIN MsTransType t ON t.id_key=h.TransTypeID
+        WHERE t.ShortName='MS' {NOT_CANCELLED} {NOT_FREE}
           AND h.VoucherDate >= DATEADD(DAY,-30,GETDATE())
         GROUP BY CAST(h.VoucherDate AS DATE) ORDER BY sale_date
     """)
@@ -82,20 +88,26 @@ def render():
     st.divider()
 
     # ── Top customers + Salesman ──────────────────────────────────────────────
+    # Aggregate invoices first, then join party to avoid TrVocItem×TrVocDetail inflation.
     col_l, col_r = st.columns(2)
 
     with col_l:
         st.subheader("Top 15 Customers")
         df_c = query(f"""
             SELECT TOP 15 p.PartyName AS customer,
-                   SUM(i.TotalAmount) AS sales,
-                   COUNT(DISTINCT h.VoucherNo) AS invoices
-            FROM TrVocHead h
-            JOIN TrVocItem i ON i.TransTypeID=h.TransTypeID AND i.VoucherNo=h.VoucherNo
-            JOIN TrVocDetail d ON d.TransTypeID=h.TransTypeID AND d.VoucherNo=h.VoucherNo
+                   SUM(v.inv_total) AS sales,
+                   COUNT(*) AS invoices
+            FROM (
+                SELECT h.TransTypeID, h.VoucherNo, SUM(i.TotalAmount) AS inv_total
+                FROM TrVocHead h
+                JOIN TrVocItem i ON i.TransTypeID=h.TransTypeID AND i.VoucherNo=h.VoucherNo
+                JOIN MsTransType t ON t.id_key=h.TransTypeID
+                WHERE t.ShortName='MS' {NOT_CANCELLED} {NOT_FREE}
+                GROUP BY h.TransTypeID, h.VoucherNo
+            ) v
+            JOIN TrVocDetail d ON d.TransTypeID=v.TransTypeID AND d.VoucherNo=v.VoucherNo
             JOIN MsPartyMaster p ON p.PartyID=d.PartyID
-            WHERE h.TransTypeID IN ({SALES_IN}) {NOT_CANCELLED} {NOT_FREE}
-              AND d.DrCrIndicator='D'
+            WHERE d.DrCrIndicator='D' AND d.PartyID IS NOT NULL
             GROUP BY p.PartyName ORDER BY sales DESC
         """)
         if not df_c.empty:
@@ -107,15 +119,22 @@ def render():
         st.subheader("Salesman Performance")
         df_sm = query(f"""
             SELECT s.FullName AS salesman,
-                   SUM(i.TotalAmount) AS sales,
-                   COUNT(DISTINCT h.VoucherNo) AS invoices,
+                   SUM(v.inv_total) AS sales,
+                   COUNT(*) AS invoices,
                    COUNT(DISTINCT d.PartyID) AS customers
-            FROM TrVocHead h
-            JOIN TrVocItem i ON i.TransTypeID=h.TransTypeID AND i.VoucherNo=h.VoucherNo
-            JOIN TrVocDetail d ON d.TransTypeID=h.TransTypeID AND d.VoucherNo=h.VoucherNo
-            JOIN MsSalesmanMaster s ON s.SalesManID=h.SalesManID
-            WHERE h.TransTypeID IN ({SALES_IN}) {NOT_CANCELLED} {NOT_FREE}
-              AND d.DrCrIndicator='D' AND s.ResignDate IS NULL
+            FROM (
+                SELECT h.TransTypeID, h.VoucherNo, h.SalesManID,
+                       SUM(i.TotalAmount) AS inv_total
+                FROM TrVocHead h
+                JOIN TrVocItem i ON i.TransTypeID=h.TransTypeID AND i.VoucherNo=h.VoucherNo
+                JOIN MsTransType t ON t.id_key=h.TransTypeID
+                WHERE t.ShortName='MS' {NOT_CANCELLED} {NOT_FREE}
+                GROUP BY h.TransTypeID, h.VoucherNo, h.SalesManID
+            ) v
+            JOIN MsSalesmanMaster s ON s.SalesManID=v.SalesManID
+            JOIN TrVocDetail d ON d.TransTypeID=v.TransTypeID AND d.VoucherNo=v.VoucherNo
+            WHERE d.DrCrIndicator='D' AND d.PartyID IS NOT NULL
+              AND s.ResignDate IS NULL
             GROUP BY s.FullName ORDER BY sales DESC
         """)
         if not df_sm.empty:
@@ -132,8 +151,9 @@ def render():
                SUM(i.TotalAmount) AS sales, SUM(i.TotalBottleQty) AS bottles
         FROM TrVocItem i
         JOIN TrVocHead h ON h.TransTypeID=i.TransTypeID AND h.VoucherNo=i.VoucherNo
+        JOIN MsTransType t ON t.id_key=h.TransTypeID
         JOIN MsBrandMaster b ON b.BrandID=i.BrandID
-        WHERE h.TransTypeID IN ({SALES_IN}) {NOT_CANCELLED} {NOT_FREE}
+        WHERE t.ShortName='MS' {NOT_CANCELLED} {NOT_FREE}
         GROUP BY b.BrandName ORDER BY sales DESC
     """)
     col_l, col_r = st.columns(2)

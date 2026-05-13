@@ -13,14 +13,16 @@ def render():
     # ── KPIs ─────────────────────────────────────────────────────────────────
     kpi = query(f"""
         SELECT
-            COUNT(DISTINCT d.PartyID)       AS debtors,
-            SUM(d.RemainingAmt)             AS total_outstanding,
-            MAX(d.RemainingAmt)             AS largest_bill,
-            COUNT(DISTINCT h.VoucherNo)     AS open_invoices
+            COUNT(DISTINCT d.PartyID)   AS debtors,
+            SUM(d.RemainingAmt)         AS total_outstanding,
+            MAX(d.RemainingAmt)         AS largest_bill,
+            COUNT(*)                    AS open_invoices
         FROM TrVocDetail d
         JOIN TrVocHead h ON h.TransTypeID=d.TransTypeID AND h.VoucherNo=d.VoucherNo
-        WHERE h.TransTypeID IN ({SALES_IN}) {NOT_CANCELLED}
+        JOIN MsTransType t ON t.id_key=h.TransTypeID
+        WHERE t.ShortName='MS' {NOT_CANCELLED}
           AND d.DrCrIndicator='D' AND d.RemainingAmt > 0
+          AND d.PartyID IS NOT NULL
     """)
     kpi_row([
         {"label": "Active Debtors",    "value": kpi["debtors"][0],          "fmt": "qty"},
@@ -44,9 +46,11 @@ def render():
             SUM(d.RemainingAmt)                                              AS total
         FROM TrVocDetail d
         JOIN TrVocHead h ON h.TransTypeID=d.TransTypeID AND h.VoucherNo=d.VoucherNo
+        JOIN MsTransType t ON t.id_key=h.TransTypeID
         JOIN MsPartyMaster p ON p.PartyID=d.PartyID
-        WHERE h.TransTypeID IN ({SALES_IN}) {NOT_CANCELLED}
+        WHERE t.ShortName='MS' {NOT_CANCELLED}
           AND d.DrCrIndicator='D' AND d.RemainingAmt > 0
+          AND d.PartyID IS NOT NULL
         GROUP BY p.PartyName ORDER BY total DESC
     """)
 
@@ -117,10 +121,11 @@ def render():
                SUM(d.RemainingAmt)        AS outstanding
         FROM TrVocDetail d
         JOIN TrVocHead h ON h.TransTypeID=d.TransTypeID AND h.VoucherNo=d.VoucherNo
+        JOIN MsTransType t ON t.id_key=h.TransTypeID
         JOIN MsSalesmanMaster s ON s.SalesManID=h.SalesManID
-        WHERE h.TransTypeID IN ({SALES_IN}) {NOT_CANCELLED}
+        WHERE t.ShortName='MS' {NOT_CANCELLED}
           AND d.DrCrIndicator='D' AND d.RemainingAmt > 0
-          AND s.ResignDate IS NULL
+          AND d.PartyID IS NOT NULL AND s.ResignDate IS NULL
         GROUP BY s.FullName ORDER BY outstanding DESC
     """)
     if not df_sm.empty:

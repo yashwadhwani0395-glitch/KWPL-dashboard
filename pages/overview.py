@@ -13,8 +13,8 @@ def render():
 
     # ── Financial Year selector ───────────────────────────────────────────────
     FY_OPTIONS = {
-        "Current FY (Apr 2026 – Present)": ("2026-04-01", None),
         "FY 2025-26 (Apr 2025 – Mar 2026)": ("2025-04-01", "2026-03-31"),
+        "FY 2026-27 (Apr 2026 – Present)":  ("2026-04-01", None),
         "All Years":                         (None,        None),
     }
     fy_sel = st.radio("Financial Year", list(FY_OPTIONS.keys()), horizontal=True)
@@ -80,7 +80,7 @@ def render():
             FROM TrVocItem vi
             JOIN TrVocHead h ON h.TransTypeID=vi.TransTypeID AND h.VoucherNo=vi.VoucherNo
             WHERE h.TransTypeID IN ({PURCHASE_IN},{SALES_IN})
-              {NOT_CANCELLED} AND vi.FreeItemYN <> 'Y'
+              {NOT_CANCELLED} AND ISNULL(vi.FreeItemYN,'N') <> 'Y'
             GROUP BY vi.ItemID
         ) sub
         JOIN MsItemMaster m ON m.ItemID = sub.ItemID
@@ -111,11 +111,12 @@ def render():
         JOIN TrVocItem i ON i.TransTypeID=h.TransTypeID AND i.VoucherNo=h.VoucherNo
         JOIN MsTransType t ON t.id_key=h.TransTypeID
         WHERE (t.ShortName='MS' OR h.TransTypeID IN ({PURCHASE_IN}))
-          {NOT_CANCELLED} AND i.FreeItemYN<>'Y'
+          {NOT_CANCELLED} AND ISNULL(i.FreeItemYN,'N')<>'Y'
           {date_filter}
         GROUP BY YEAR(h.VoucherDate), MONTH(h.VoucherDate)
         ORDER BY yr, mo
     """)
+    # Collections = bank/cash debit side of receipt vouchers (DrCrIndicator='D')
     df_coll = query(f"""
         SELECT YEAR(h.VoucherDate) AS yr, MONTH(h.VoucherDate) AS mo,
                SUM(d.Amount) AS collections
@@ -124,68 +125,11 @@ def render():
         JOIN MsTransType t ON t.id_key=h.TransTypeID
         WHERE t.ShortName IN ('BR','CR')
           AND ISNULL(h.Cancelled,'N') <> 'Y'
-          AND d.PartyID IS NOT NULL
+          AND d.DrCrIndicator='D'
           {date_filter}
         GROUP BY YEAR(h.VoucherDate), MONTH(h.VoucherDate)
         ORDER BY yr, mo
     """)
-
-    # ── Diagnostics (temporary) ───────────────────────────────────────────────
-    with st.expander("🔍 Debug: Collections & Sales mapping", expanded=False):
-        diag_dates = query("""
-            SELECT MIN(VoucherDate) AS min_date, MAX(VoucherDate) AS max_date,
-                   COUNT(*) AS total_vouchers
-            FROM TrVocHead
-        """)
-        st.write("**All vouchers date range:**", diag_dates)
-
-        diag_sales_cmp = query(f"""
-            SELECT
-                SUM(CASE WHEN t.ShortName='MS' THEN i.TotalAmount ELSE 0 END) AS sales_via_shortname,
-                SUM(CASE WHEN h.TransTypeID IN ({SALES_IN}) THEN i.TotalAmount ELSE 0 END) AS sales_via_typeid
-            FROM TrVocHead h
-            JOIN TrVocItem i ON i.TransTypeID=h.TransTypeID AND i.VoucherNo=h.VoucherNo
-            JOIN MsTransType t ON t.id_key=h.TransTypeID
-            WHERE (t.ShortName='MS' OR h.TransTypeID IN ({SALES_IN}))
-              {date_filter}
-        """)
-        st.write("**Sales total: ShortName='MS' vs TransTypeID list:**", diag_sales_cmp)
-
-        diag_ms_types = query(f"""
-            SELECT t.id_key, t.ShortName, t.TypeName,
-                   SUM(i.TotalAmount) AS sales
-            FROM TrVocHead h
-            JOIN TrVocItem i ON i.TransTypeID=h.TransTypeID AND i.VoucherNo=h.VoucherNo
-            JOIN MsTransType t ON t.id_key=h.TransTypeID
-            WHERE t.ShortName='MS' {date_filter}
-            GROUP BY t.id_key, t.ShortName, t.TypeName
-            ORDER BY sales DESC
-        """)
-        st.write("**All MS TransTypeIDs and their sales:**", diag_ms_types)
-
-        diag_rc = query("""
-            SELECT t.ShortName, COUNT(*) AS voucher_count
-            FROM TrVocHead h
-            JOIN MsTransType t ON t.id_key=h.TransTypeID
-            WHERE t.ShortName IN ('BR','CR','BP','CE')
-            GROUP BY t.ShortName
-        """)
-        st.write("**BR/CR voucher counts (no date filter):**", diag_rc)
-
-        diag_coll_raw = query("""
-            SELECT TOP 20 h.VoucherDate, h.TransTypeID, t.ShortName,
-                   d.DrCrIndicator, d.PartyID, d.Amount
-            FROM TrVocDetail d
-            JOIN TrVocHead h ON h.TransTypeID=d.TransTypeID AND h.VoucherNo=d.VoucherNo
-            JOIN MsTransType t ON t.id_key=h.TransTypeID
-            WHERE t.ShortName IN ('BR','CR')
-            ORDER BY h.VoucherDate DESC
-        """)
-        st.write("**Sample BR/CR TrVocDetail rows (newest 20, no date filter):**", diag_coll_raw)
-
-        st.write(f"**df_coll rows (with current FY filter):** {len(df_coll)}")
-        if not df_coll.empty:
-            st.dataframe(df_coll)
 
     if not df_trend.empty:
         df_trend = month_col(df_trend)
@@ -349,19 +293,25 @@ def render():
     st.divider()
 
     # ── Top 10 Customers ─────────────────────────────────────────────────────
+    # Aggregate to invoice level first, then join party — avoids TrVocItem×TrVocDetail
+    # cartesian product inflation.
     st.subheader("Top 10 Customers by Sales")
     df_cust = query(f"""
         SELECT TOP 10 p.PartyName AS customer,
-               SUM(i.TotalAmount) AS sales,
-               COUNT(DISTINCT h.VoucherNo) AS invoices
-        FROM TrVocHead h
-        JOIN TrVocItem i ON i.TransTypeID=h.TransTypeID AND i.VoucherNo=h.VoucherNo
-        JOIN TrVocDetail d ON d.TransTypeID=h.TransTypeID AND d.VoucherNo=h.VoucherNo
+               SUM(v.inv_total) AS sales,
+               COUNT(*) AS invoices
+        FROM (
+            SELECT h.TransTypeID, h.VoucherNo, SUM(i.TotalAmount) AS inv_total
+            FROM TrVocHead h
+            JOIN TrVocItem i ON i.TransTypeID=h.TransTypeID AND i.VoucherNo=h.VoucherNo
+            JOIN MsTransType t ON t.id_key=h.TransTypeID
+            WHERE t.ShortName='MS' {NOT_CANCELLED} {NOT_FREE}
+              {date_filter}
+            GROUP BY h.TransTypeID, h.VoucherNo
+        ) v
+        JOIN TrVocDetail d ON d.TransTypeID=v.TransTypeID AND d.VoucherNo=v.VoucherNo
         JOIN MsPartyMaster p ON p.PartyID=d.PartyID
-        JOIN MsTransType t ON t.id_key=h.TransTypeID
-        WHERE t.ShortName='MS' {NOT_CANCELLED} {NOT_FREE}
-          AND d.DrCrIndicator='D'
-          {date_filter}
+        WHERE d.DrCrIndicator='D' AND d.PartyID IS NOT NULL
         GROUP BY p.PartyName ORDER BY sales DESC
     """)
     if not df_cust.empty:
