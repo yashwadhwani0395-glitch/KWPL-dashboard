@@ -60,6 +60,7 @@ def render():
         JOIN MsTransType t ON t.id_key=h.TransTypeID
         WHERE t.ShortName='MS' {NOT_CANCELLED}
           AND d.DrCrIndicator='D' AND d.RemainingAmt > 0
+          AND d.PartyID IS NOT NULL
           {date_filter}
     """)
     stock_val = query(f"""
@@ -114,7 +115,9 @@ def render():
         FROM TrVocDetail d
         JOIN TrVocHead h ON h.TransTypeID=d.TransTypeID AND h.VoucherNo=d.VoucherNo
         JOIN MsTransType t ON t.id_key=h.TransTypeID
-        WHERE t.ShortName IN ('BR','CR') {NOT_CANCELLED} AND d.DrCrIndicator='C'
+        WHERE t.ShortName IN ('BR','CR') {NOT_CANCELLED}
+          AND d.DrCrIndicator='C'
+          AND d.PartyID IS NOT NULL
           {date_filter}
         GROUP BY YEAR(h.VoucherDate), MONTH(h.VoucherDate)
         ORDER BY yr, mo
