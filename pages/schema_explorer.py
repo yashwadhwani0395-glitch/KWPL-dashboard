@@ -538,6 +538,87 @@ def render():
                 ) all_parties
                 WHERE net_balance > 0
             """),
+            ("Y — TrVocDetail columns (what fields does it have?)", """
+                SELECT COLUMN_NAME, DATA_TYPE, CHARACTER_MAXIMUM_LENGTH
+                FROM INFORMATION_SCHEMA.COLUMNS
+                WHERE TABLE_NAME='TrVocDetail'
+                ORDER BY ORDINAL_POSITION
+            """),
+            ("Y2 — MsAccountHead columns", """
+                SELECT COLUMN_NAME, DATA_TYPE
+                FROM INFORMATION_SCHEMA.COLUMNS
+                WHERE TABLE_NAME='MsAccountHead'
+                ORDER BY ORDINAL_POSITION
+            """),
+            ("Y3 — Find YR Wines account in MsAccountHead", """
+                SELECT AccountHeadID, AccountHeadName, SubheadID
+                FROM MsAccountHead
+                WHERE AccountHeadName LIKE '%YR%' OR AccountHeadName LIKE '%Y R%'
+                   OR AccountHeadName LIKE '%VIRANSH%' OR AccountHeadName LIKE '%yr%'
+            """),
+            ("Y4 — TrVocDetail for YR Wines by AccountID (find correct outstanding)", """
+                SELECT t.ShortName, d.DrCrIndicator,
+                       COUNT(DISTINCT h.VoucherNo) AS vouchers,
+                       SUM(d.Amount) AS amount
+                FROM TrVocDetail d
+                JOIN TrVocHead h ON h.TransTypeID=d.TransTypeID AND h.VoucherNo=d.VoucherNo
+                JOIN MsTransType t ON t.id_key=h.TransTypeID
+                JOIN MsAccountHead a ON a.AccountHeadID=d.AccountID
+                WHERE ISNULL(h.Cancelled,'N') <> 'Y'
+                  AND (a.AccountHeadName LIKE '%YR%' OR a.AccountHeadName LIKE '%Y R%'
+                       OR a.AccountHeadName LIKE '%VIRANSH%')
+                  AND h.VoucherDate < '2026-04-01'
+                GROUP BY t.ShortName, d.DrCrIndicator
+                ORDER BY amount DESC
+            """),
+            ("Y5 — MsAccountHead subhead/mainhead hierarchy for DEBTORS", """
+                SELECT xs.SubheadID, xs.Subhead, xm.MainheadID, xm.Mainhead
+                FROM XMainheadSubhead xs
+                JOIN XMainheadTypeMainhead xm ON xm.MainheadID=xs.MainheadID
+                WHERE xm.Mainhead LIKE '%DEBTOR%' OR xs.Subhead LIKE '%DEBTOR%'
+                   OR xm.Mainhead LIKE '%debtor%' OR xs.Subhead LIKE '%debtor%'
+            """),
+            ("Y6 — All account heads under DEBTORS mainhead (if hierarchy found)", """
+                SELECT a.AccountHeadID, a.AccountHeadName, a.SubheadID
+                FROM MsAccountHead a
+                JOIN XMainheadSubhead xs ON xs.SubheadID=a.SubheadID
+                JOIN XMainheadTypeMainhead xm ON xm.MainheadID=xs.MainheadID
+                WHERE xm.Mainhead LIKE '%DEBTOR%' OR xm.Mainhead LIKE '%debtor%'
+                ORDER BY a.AccountHeadName
+            """),
+            ("Y7 — Outstanding by AccountID (DEBTORS mainhead) as on 31.03.2026", """
+                SELECT
+                    COUNT(*) AS debtor_count,
+                    SUM(net_balance) AS total_outstanding
+                FROM (
+                    SELECT d.AccountID,
+                           SUM(CASE WHEN d.DrCrIndicator='D' THEN d.Amount ELSE -d.Amount END) AS net_balance
+                    FROM TrVocDetail d
+                    JOIN TrVocHead h ON h.TransTypeID=d.TransTypeID AND h.VoucherNo=d.VoucherNo
+                    JOIN MsAccountHead a ON a.AccountHeadID=d.AccountID
+                    JOIN XMainheadSubhead xs ON xs.SubheadID=a.SubheadID
+                    JOIN XMainheadTypeMainhead xm ON xm.MainheadID=xs.MainheadID
+                    WHERE ISNULL(h.Cancelled,'N') <> 'Y'
+                      AND (xm.Mainhead LIKE '%DEBTOR%' OR xm.Mainhead LIKE '%debtor%')
+                      AND h.VoucherDate < '2026-04-01'
+                    GROUP BY d.AccountID
+                    HAVING SUM(CASE WHEN d.DrCrIndicator='D' THEN d.Amount ELSE -d.Amount END) > 0
+                ) sub
+            """),
+            ("Y8 — YR Wines outstanding via AccountID approach", """
+                SELECT a.AccountHeadName,
+                       SUM(CASE WHEN d.DrCrIndicator='D' THEN d.Amount ELSE 0 END) AS total_dr,
+                       SUM(CASE WHEN d.DrCrIndicator='C' THEN d.Amount ELSE 0 END) AS total_cr,
+                       SUM(CASE WHEN d.DrCrIndicator='D' THEN d.Amount ELSE -d.Amount END) AS net_balance
+                FROM TrVocDetail d
+                JOIN TrVocHead h ON h.TransTypeID=d.TransTypeID AND h.VoucherNo=d.VoucherNo
+                JOIN MsAccountHead a ON a.AccountHeadID=d.AccountID
+                WHERE ISNULL(h.Cancelled,'N') <> 'Y'
+                  AND (a.AccountHeadName LIKE '%YR%' OR a.AccountHeadName LIKE '%Y R%'
+                       OR a.AccountHeadName LIKE '%VIRANSH%')
+                  AND h.VoucherDate < '2026-04-01'
+                GROUP BY a.AccountHeadName, d.AccountID
+            """),
             ]
 
             import io, zipfile
