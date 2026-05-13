@@ -9,6 +9,23 @@ from components.charts import grouped_bar, bar_chart, pie_chart
 def render():
     st.header("Business Overview")
 
+    # ── Financial Year selector ───────────────────────────────────────────────
+    FY_OPTIONS = {
+        "Current FY (Apr 2026 – Present)": ("2026-04-01", None),
+        "FY 2025-26 (Apr 2025 – Mar 2026)": ("2025-04-01", "2026-03-31"),
+        "All Years":                         (None,        None),
+    }
+    fy_sel = st.radio("Financial Year", list(FY_OPTIONS.keys()), horizontal=True)
+    date_from, date_to = FY_OPTIONS[fy_sel]
+
+    date_filter = ""
+    if date_from:
+        date_filter += f" AND h.VoucherDate >= '{date_from}'"
+    if date_to:
+        date_filter += f" AND h.VoucherDate <= '{date_to}'"
+
+    st.divider()
+
     # ── KPIs ─────────────────────────────────────────────────────────────────
     kpi = query(f"""
         SELECT
@@ -31,6 +48,7 @@ def render():
             ON d.TransTypeID=h.TransTypeID AND d.VoucherNo=h.VoucherNo
             AND d.DrCrIndicator='D'
         WHERE h.TransTypeID IN ({SALES_IN},{PURCHASE_IN})
+          {date_filter}
     """)
     outstanding = query(f"""
         SELECT SUM(d.RemainingAmt) AS total_outstanding
@@ -38,6 +56,7 @@ def render():
         JOIN TrVocHead h ON h.TransTypeID=d.TransTypeID AND h.VoucherNo=d.VoucherNo
         WHERE h.TransTypeID IN ({SALES_IN}) {NOT_CANCELLED}
           AND d.DrCrIndicator='D' AND d.RemainingAmt > 0
+          {date_filter}
     """)
     stock_val = query(f"""
         SELECT SUM(sub.net_bottles * m.MrpBottRate) AS stock_value
@@ -77,6 +96,7 @@ def render():
         JOIN TrVocItem i ON i.TransTypeID=h.TransTypeID AND i.VoucherNo=h.VoucherNo
         WHERE h.TransTypeID IN ({SALES_IN},{PURCHASE_IN})
           {NOT_CANCELLED} AND i.FreeItemYN<>'Y'
+          {date_filter}
         GROUP BY YEAR(h.VoucherDate), MONTH(h.VoucherDate)
         ORDER BY yr, mo
     """)
@@ -87,6 +107,7 @@ def render():
         JOIN TrVocHead h ON h.TransTypeID=d.TransTypeID AND h.VoucherNo=d.VoucherNo
         JOIN MsTransType t ON t.id_key=h.TransTypeID
         WHERE t.ShortName IN ('BR','CR') {NOT_CANCELLED} AND d.DrCrIndicator='C'
+          {date_filter}
         GROUP BY YEAR(h.VoucherDate), MONTH(h.VoucherDate)
         ORDER BY yr, mo
     """)
@@ -120,6 +141,7 @@ def render():
             JOIN TrVocItem i ON i.TransTypeID=h.TransTypeID AND i.VoucherNo=h.VoucherNo
             JOIN MsTransType t ON t.id_key=h.TransTypeID
             WHERE h.TransTypeID IN ({SALES_IN}) {NOT_CANCELLED} {NOT_FREE}
+              {date_filter}
             GROUP BY t.TransTypeName ORDER BY sales DESC
         """)
         with col_l:
@@ -138,6 +160,7 @@ def render():
             JOIN TrVocHead h ON h.TransTypeID=i.TransTypeID AND h.VoucherNo=i.VoucherNo
             JOIN MsBrandMaster b ON b.BrandID=i.BrandID
             WHERE h.TransTypeID IN ({SALES_IN}) {NOT_CANCELLED} {NOT_FREE}
+              {date_filter}
             GROUP BY b.BrandName ORDER BY sales DESC
         """)
         with col_l:
@@ -158,6 +181,7 @@ def render():
             JOIN TrVocHead h ON h.TransTypeID=i.TransTypeID AND h.VoucherNo=i.VoucherNo
             JOIN MsItemMaster m ON m.ItemID=i.ItemID
             WHERE h.TransTypeID IN ({SALES_IN}) {NOT_CANCELLED} {NOT_FREE}
+              {date_filter}
             GROUP BY m.ItemDescription ORDER BY sales DESC
         """)
         with col_l:
