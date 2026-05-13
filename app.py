@@ -10,6 +10,7 @@ st.set_page_config(
 st.title(f"🍷 {COMPANY_NAME} — Dashboard")
 
 from pages import overview, sales, purchases_stock, debtors_ageing, cashflow_expenses, balance_sheet
+from pages import schema_explorer
 
 tabs = st.tabs([
     "🏠 Overview",
@@ -18,6 +19,7 @@ tabs = st.tabs([
     "💰 Debtors Ageing",
     "💸 Cash Flow & Expenses",
     "📋 Balance Sheet",
+    "🔍 DB Explorer",
 ])
 
 with tabs[0]: overview.render()
@@ -26,3 +28,4 @@ with tabs[2]: purchases_stock.render()
 with tabs[3]: debtors_ageing.render()
 with tabs[4]: cashflow_expenses.render()
 with tabs[5]: balance_sheet.render()
+with tabs[6]: schema_explorer.render()
