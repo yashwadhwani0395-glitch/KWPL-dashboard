@@ -154,41 +154,25 @@ def render():
     # ── Tab 3: Diagnostics ────────────────────────────────────────────────────
     with tab_diag:
         st.subheader("Live Diagnostics — Collections / Sales / Outstanding")
-        st.caption("Runs 8 targeted queries. Download all results as Excel for sharing.")
+        st.caption("Runs targeted queries across all transaction types. Download all results as ZIP.")
 
         DIAG_SECTIONS = [
-            ("I — MS TransType breakdown (sales by type name)", """
-                SELECT t.TransTypeName, t.ShortName, t.id_key AS TransTypeID,
-                       COUNT(DISTINCT h.VoucherNo) AS vouchers,
-                       SUM(i.TotalAmount)           AS total_amount,
-                       MIN(h.VoucherDate)           AS earliest,
-                       MAX(h.VoucherDate)           AS latest
-                FROM TrVocHead h
-                JOIN TrVocItem i ON i.TransTypeID=h.TransTypeID AND i.VoucherNo=h.VoucherNo
-                JOIN MsTransType t ON t.id_key=h.TransTypeID
-                WHERE t.ShortName='MS'
-                  AND ISNULL(h.Cancelled,'N') <> 'Y'
-                  AND ISNULL(i.FreeItemYN,'N') <> 'Y'
-                GROUP BY t.TransTypeName, t.ShortName, t.id_key
-                ORDER BY total_amount DESC
-            """),
-            ("J — MS top 20 parties on DEBIT side (who are the customers?)", """
-                SELECT TOP 20 p.PartyName, p.PartyID,
-                       COUNT(DISTINCT h.VoucherNo) AS invoices,
-                       SUM(d.Amount)               AS total_amount
+            ("L — ALL transaction types with totals FY25-26 (find collections)", """
+                SELECT t.ShortName, t.TransTypeName,
+                       COUNT(DISTINCT h.VoucherNo)                                   AS vouchers,
+                       SUM(CASE WHEN d.DrCrIndicator='D' THEN d.Amount ELSE 0 END)  AS dr_total,
+                       SUM(CASE WHEN d.DrCrIndicator='C' THEN d.Amount ELSE 0 END)  AS cr_total
                 FROM TrVocDetail d
                 JOIN TrVocHead h  ON h.TransTypeID=d.TransTypeID AND h.VoucherNo=d.VoucherNo
                 JOIN MsTransType t ON t.id_key=h.TransTypeID
-                JOIN MsPartyMaster p ON p.PartyID=d.PartyID
-                WHERE t.ShortName='MS'
-                  AND ISNULL(h.Cancelled,'N') <> 'Y'
-                  AND d.DrCrIndicator='D'
-                  AND d.PartyID IS NOT NULL
-                GROUP BY p.PartyName, p.PartyID
-                ORDER BY total_amount DESC
+                WHERE ISNULL(h.Cancelled,'N') <> 'Y'
+                  AND h.VoucherDate >= '2025-04-01'
+                  AND h.VoucherDate <  '2026-04-01'
+                GROUP BY t.ShortName, t.TransTypeName
+                ORDER BY dr_total DESC
             """),
-            ("K — MS FY25-26 total by TransTypeID (to find retail-only type)", """
-                SELECT t.id_key AS TransTypeID, t.TransTypeName,
+            ("I — MS TransType breakdown by name", """
+                SELECT t.TransTypeName, t.id_key AS TransTypeID,
                        COUNT(DISTINCT h.VoucherNo) AS vouchers,
                        SUM(i.TotalAmount)           AS total_amount
                 FROM TrVocHead h
@@ -198,24 +182,27 @@ def render():
                   AND ISNULL(h.Cancelled,'N') <> 'Y'
                   AND ISNULL(i.FreeItemYN,'N') <> 'Y'
                   AND h.VoucherDate >= '2025-04-01'
-                  AND h.VoucherDate <= '2026-03-31'
-                GROUP BY t.id_key, t.TransTypeName
+                  AND h.VoucherDate <  '2026-04-01'
+                GROUP BY t.TransTypeName, t.id_key
                 ORDER BY total_amount DESC
             """),
-            ("A — TrVocDetail columns", """
-                SELECT COLUMN_NAME, DATA_TYPE
-                FROM INFORMATION_SCHEMA.COLUMNS
-                WHERE TABLE_NAME='TrVocDetail'
-                ORDER BY ORDINAL_POSITION
-            """),
-            ("B — Sample BR receipt (TrVocDetail, all columns)", """
-                SELECT TOP 20 d.*
+            ("J — MS top 20 debit-side parties FY25-26", """
+                SELECT TOP 20 p.PartyName, p.PartyID,
+                       COUNT(DISTINCT h.VoucherNo) AS invoices,
+                       SUM(d.Amount)               AS total_amount
                 FROM TrVocDetail d
                 JOIN TrVocHead h  ON h.TransTypeID=d.TransTypeID AND h.VoucherNo=d.VoucherNo
                 JOIN MsTransType t ON t.id_key=h.TransTypeID
-                WHERE t.ShortName='BR'
-                ORDER BY h.VoucherDate DESC
+                JOIN MsPartyMaster p ON p.PartyID=d.PartyID
+                WHERE t.ShortName='MS'
+                  AND ISNULL(h.Cancelled,'N') <> 'Y'
+                  AND d.DrCrIndicator='D' AND d.PartyID IS NOT NULL
+                  AND h.VoucherDate >= '2025-04-01'
+                  AND h.VoucherDate <  '2026-04-01'
+                GROUP BY p.PartyName, p.PartyID
+                ORDER BY total_amount DESC
             """),
+
             ("C — Collections by DrCrIndicator (BR+CR, all time)", """
                 SELECT
                     d.DrCrIndicator,
@@ -229,19 +216,22 @@ def render():
                   AND ISNULL(h.Cancelled,'N') <> 'Y'
                 GROUP BY d.DrCrIndicator
             """),
-            ("D — Collections FY 2025-26 by DrCrIndicator", """
-                SELECT
-                    d.DrCrIndicator,
-                    SUM(d.Amount) AS total_amount,
-                    COUNT(*)      AS rows
+            ("D — BR/CR voucher detail FY 2025-26", """
+                SELECT t.ShortName,
+                       COUNT(DISTINCT h.VoucherNo)                                   AS vouchers,
+                       MIN(h.VoucherDate)                                            AS earliest,
+                       MAX(h.VoucherDate)                                            AS latest,
+                       SUM(CASE WHEN d.DrCrIndicator='D' THEN d.Amount ELSE 0 END)  AS dr_total,
+                       SUM(CASE WHEN d.DrCrIndicator='C' THEN d.Amount ELSE 0 END)  AS cr_total,
+                       COUNT(DISTINCT d.PartyID)                                     AS distinct_parties
                 FROM TrVocDetail d
                 JOIN TrVocHead h  ON h.TransTypeID=d.TransTypeID AND h.VoucherNo=d.VoucherNo
                 JOIN MsTransType t ON t.id_key=h.TransTypeID
                 WHERE t.ShortName IN ('BR','CR')
                   AND ISNULL(h.Cancelled,'N') <> 'Y'
                   AND h.VoucherDate >= '2025-04-01'
-                  AND h.VoucherDate <= '2026-03-31'
-                GROUP BY d.DrCrIndicator
+                  AND h.VoucherDate <  '2026-04-01'
+                GROUP BY t.ShortName
             """),
             ("E — Sales total: All Time vs FY 2025-26", """
                 SELECT 'All Time' AS period,
@@ -270,7 +260,7 @@ def render():
                   AND ISNULL(h.Cancelled,'N') <> 'Y'
                   AND ISNULL(i.FreeItemYN,'N') <> 'Y'
                   AND h.VoucherDate >= '2025-04-01'
-                  AND h.VoucherDate <= '2026-03-31'
+                  AND h.VoucherDate <  '2026-04-01'
             """),
             ("F — RemainingAmt summary (entire TrVocDetail)", """
                 SELECT
@@ -335,7 +325,7 @@ def render():
                 st.button("⬇️ Download Results (.zip)", disabled=True, use_container_width=True)
 
         if run_clicked:
-            with st.spinner("Running 8 queries…"):
+            with st.spinner("Running diagnostics…"):
                 results = {}
                 for title, sql in DIAG_SECTIONS:
                     try:

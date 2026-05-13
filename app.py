@@ -12,7 +12,7 @@ st.title(f"🍷 {COMPANY_NAME} — Dashboard")
 # ── Global sidebar controls ───────────────────────────────────────────────────
 with st.sidebar:
     FY_OPTIONS = {
-        "FY 2025-26 (Apr 2025 – Mar 2026)": ("2025-04-01", "2026-03-31"),
+        "FY 2025-26 (Apr 2025 – Mar 2026)": ("2025-04-01", "2026-04-01"),
         "FY 2026-27 (Apr 2026 – Present)":  ("2026-04-01", None),
         "All Years":                          (None,        None),
     }
@@ -23,7 +23,7 @@ with st.sidebar:
     if date_from:
         date_filter += f" AND h.VoucherDate >= '{date_from}'"
     if date_to:
-        date_filter += f" AND h.VoucherDate <= '{date_to}'"
+        date_filter += f" AND h.VoucherDate < '{date_to}'"
     st.session_state["date_filter"] = date_filter
 
     st.divider()
