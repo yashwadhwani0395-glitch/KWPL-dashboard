@@ -36,13 +36,22 @@ def render():
     """)
     ar_ap = query(f"""
         SELECT
-            SUM(CASE WHEN t.ShortName='MS' AND d.DrCrIndicator='D' AND d.PartyID IS NOT NULL AND d.RemainingAmt > 0 THEN d.RemainingAmt ELSE 0 END) AS receivables,
-            SUM(CASE WHEN h.TransTypeID IN ({PURCHASE_IN}) AND d.DrCrIndicator='C' AND d.RemainingAmt > 0 THEN d.RemainingAmt ELSE 0 END) AS payables
-        FROM TrVocDetail d
-        JOIN TrVocHead h ON h.TransTypeID=d.TransTypeID AND h.VoucherNo=d.VoucherNo
-        JOIN MsTransType t ON t.id_key=h.TransTypeID
-        WHERE {NOT_CANCELLED[4:]}
-          AND d.RemainingAmt > 0
+            (SELECT SUM(net_balance) FROM (
+                SELECT SUM(CASE WHEN d.DrCrIndicator='D' THEN d.Amount ELSE -d.Amount END) AS net_balance
+                FROM TrVocDetail d
+                JOIN TrVocHead h ON h.TransTypeID=d.TransTypeID AND h.VoucherNo=d.VoucherNo
+                WHERE ISNULL(h.Cancelled,'N') <> 'Y' AND d.PartyID LIKE 'D%'
+                GROUP BY d.PartyID
+                HAVING SUM(CASE WHEN d.DrCrIndicator='D' THEN d.Amount ELSE -d.Amount END) > 0
+            ) r) AS receivables,
+            (SELECT SUM(net_balance) FROM (
+                SELECT SUM(CASE WHEN d.DrCrIndicator='C' THEN d.Amount ELSE -d.Amount END) AS net_balance
+                FROM TrVocDetail d
+                JOIN TrVocHead h ON h.TransTypeID=d.TransTypeID AND h.VoucherNo=d.VoucherNo
+                WHERE ISNULL(h.Cancelled,'N') <> 'Y' AND d.PartyID LIKE 'C%'
+                GROUP BY d.PartyID
+                HAVING SUM(CASE WHEN d.DrCrIndicator='C' THEN d.Amount ELSE -d.Amount END) > 0
+            ) p) AS payables
     """)
     stock_val = query(f"""
         SELECT SUM(sub.net_bottles * m.MrpBottRate) AS mrp

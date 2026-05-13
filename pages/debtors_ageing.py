@@ -11,25 +11,27 @@ def render():
     st.header("Debtors & Outstanding")
     date_filter = st.session_state.get("date_filter", "")
 
-    # ── KPIs ─────────────────────────────────────────────────────────────────
-    kpi = query(f"""
+    # ── KPIs — net ledger balance (DR - CR) for D% parties = true closing balance ──
+    kpi = query("""
         SELECT
-            COUNT(DISTINCT d.PartyID)   AS debtors,
-            SUM(d.RemainingAmt)         AS total_outstanding,
-            MAX(d.RemainingAmt)         AS largest_bill,
-            COUNT(*)                    AS open_invoices
-        FROM TrVocDetail d
-        JOIN TrVocHead h ON h.TransTypeID=d.TransTypeID AND h.VoucherNo=d.VoucherNo
-        JOIN MsTransType t ON t.id_key=h.TransTypeID
-        WHERE t.ShortName='MS' {NOT_CANCELLED}
-          AND d.DrCrIndicator='D' AND d.RemainingAmt > 0
-          AND d.PartyID IS NOT NULL
+            COUNT(*)         AS debtors,
+            SUM(net_balance) AS total_outstanding,
+            MAX(net_balance) AS largest_balance
+        FROM (
+            SELECT d.PartyID,
+                   SUM(CASE WHEN d.DrCrIndicator='D' THEN d.Amount ELSE -d.Amount END) AS net_balance
+            FROM TrVocDetail d
+            JOIN TrVocHead h ON h.TransTypeID=d.TransTypeID AND h.VoucherNo=d.VoucherNo
+            WHERE ISNULL(h.Cancelled,'N') <> 'Y'
+              AND d.PartyID LIKE 'D%'
+            GROUP BY d.PartyID
+            HAVING SUM(CASE WHEN d.DrCrIndicator='D' THEN d.Amount ELSE -d.Amount END) > 0
+        ) sub
     """)
     kpi_row([
         {"label": "Active Debtors",    "value": kpi["debtors"][0],          "fmt": "qty"},
         {"label": "Total Outstanding", "value": kpi["total_outstanding"][0],"fmt": "inr"},
-        {"label": "Open Invoices",     "value": kpi["open_invoices"][0],    "fmt": "qty"},
-        {"label": "Largest Bill",      "value": kpi["largest_bill"][0],     "fmt": "inr"},
+        {"label": "Largest Balance",   "value": kpi["largest_balance"][0],  "fmt": "inr"},
     ])
 
     st.divider()
@@ -114,21 +116,25 @@ def render():
         ]
         st.dataframe(df_show, use_container_width=True, hide_index=True)
 
-    # ── Salesman-wise outstanding ─────────────────────────────────────────────
+    # ── Salesman-wise outstanding — net ledger balance per salesman ───────────
     st.divider()
     st.subheader("Salesman-wise Outstanding")
-    df_sm = query(f"""
+    df_sm = query("""
         SELECT s.FullName AS salesman,
-               COUNT(DISTINCT d.PartyID)  AS debtors,
-               SUM(d.RemainingAmt)        AS outstanding
-        FROM TrVocDetail d
-        JOIN TrVocHead h ON h.TransTypeID=d.TransTypeID AND h.VoucherNo=d.VoucherNo
-        JOIN MsTransType t ON t.id_key=h.TransTypeID
-        JOIN MsSalesmanMaster s ON s.SalesManID=h.SalesManID
-        WHERE t.ShortName='MS' {NOT_CANCELLED}
-          AND d.DrCrIndicator='D' AND d.RemainingAmt > 0
-          AND d.PartyID IS NOT NULL AND s.ResignDate IS NULL
-          {date_filter}
+               COUNT(DISTINCT sub.PartyID) AS debtors,
+               SUM(sub.net_balance)        AS outstanding
+        FROM (
+            SELECT h.SalesManID, d.PartyID,
+                   SUM(CASE WHEN d.DrCrIndicator='D' THEN d.Amount ELSE -d.Amount END) AS net_balance
+            FROM TrVocDetail d
+            JOIN TrVocHead h ON h.TransTypeID=d.TransTypeID AND h.VoucherNo=d.VoucherNo
+            WHERE ISNULL(h.Cancelled,'N') <> 'Y'
+              AND d.PartyID LIKE 'D%'
+            GROUP BY h.SalesManID, d.PartyID
+            HAVING SUM(CASE WHEN d.DrCrIndicator='D' THEN d.Amount ELSE -d.Amount END) > 0
+        ) sub
+        JOIN MsSalesmanMaster s ON s.SalesManID=sub.SalesManID
+        WHERE s.ResignDate IS NULL
         GROUP BY s.FullName ORDER BY outstanding DESC
     """)
     if not df_sm.empty:

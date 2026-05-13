@@ -182,6 +182,71 @@ def render():
                                   ELSE 'Other: '+LEFT(d.PartyID,1) END
                     ORDER BY total_amount DESC
                 """),
+                ("P — ALL credits to customer (D%) accounts FY25-26 by type (= TRUE collections)", """
+                    SELECT t.ShortName, t.TransTypeName,
+                           COUNT(DISTINCT CAST(h.TransTypeID AS VARCHAR)+'|'+h.VoucherNo) AS vouchers,
+                           SUM(d.Amount) AS amount_credited_to_customers
+                    FROM TrVocDetail d
+                    JOIN TrVocHead h  ON h.TransTypeID=d.TransTypeID AND h.VoucherNo=d.VoucherNo
+                    JOIN MsTransType t ON t.id_key=h.TransTypeID
+                    WHERE ISNULL(h.Cancelled,'N') <> 'Y'
+                      AND d.DrCrIndicator='C'
+                      AND d.PartyID LIKE 'D%'
+                      AND h.VoucherDate >= '2025-04-01'
+                      AND h.VoucherDate <  '2026-04-01'
+                    GROUP BY t.ShortName, t.TransTypeName
+                    ORDER BY amount_credited_to_customers DESC
+                """),
+                ("Q — Net ledger balance (DR-CR) per D% customer as on 31.03.2026 (= true debtors)", """
+                    SELECT TOP 30 p.PartyName, sub.PartyID,
+                           sub.total_dr, sub.total_cr, sub.net_balance
+                    FROM (
+                        SELECT d.PartyID,
+                               SUM(CASE WHEN d.DrCrIndicator='D' THEN d.Amount ELSE 0 END) AS total_dr,
+                               SUM(CASE WHEN d.DrCrIndicator='C' THEN d.Amount ELSE 0 END) AS total_cr,
+                               SUM(CASE WHEN d.DrCrIndicator='D' THEN d.Amount ELSE -d.Amount END) AS net_balance
+                        FROM TrVocDetail d
+                        JOIN TrVocHead h ON h.TransTypeID=d.TransTypeID AND h.VoucherNo=d.VoucherNo
+                        WHERE ISNULL(h.Cancelled,'N') <> 'Y'
+                          AND d.PartyID LIKE 'D%'
+                          AND h.VoucherDate < '2026-04-01'
+                        GROUP BY d.PartyID
+                        HAVING SUM(CASE WHEN d.DrCrIndicator='D' THEN d.Amount ELSE -d.Amount END) > 0
+                    ) sub
+                    JOIN MsPartyMaster p ON p.PartyID=sub.PartyID
+                    ORDER BY sub.net_balance DESC
+                """),
+                ("R — Total debtors summary as on 31.03.2026 (net ledger vs RemainingAmt)", """
+                    SELECT
+                        ledger.debtor_count_ledger,
+                        ledger.total_outstanding_ledger,
+                        ra.total_outstanding_remaining_amt
+                    FROM (
+                        SELECT COUNT(*) AS debtor_count_ledger,
+                               SUM(net_balance) AS total_outstanding_ledger
+                        FROM (
+                            SELECT d.PartyID,
+                                   SUM(CASE WHEN d.DrCrIndicator='D' THEN d.Amount ELSE -d.Amount END) AS net_balance
+                            FROM TrVocDetail d
+                            JOIN TrVocHead h ON h.TransTypeID=d.TransTypeID AND h.VoucherNo=d.VoucherNo
+                            WHERE ISNULL(h.Cancelled,'N') <> 'Y'
+                              AND d.PartyID LIKE 'D%'
+                              AND h.VoucherDate < '2026-04-01'
+                            GROUP BY d.PartyID
+                            HAVING SUM(CASE WHEN d.DrCrIndicator='D' THEN d.Amount ELSE -d.Amount END) > 0
+                        ) sub
+                    ) ledger
+                    CROSS JOIN (
+                        SELECT SUM(d.RemainingAmt) AS total_outstanding_remaining_amt
+                        FROM TrVocDetail d
+                        JOIN TrVocHead h ON h.TransTypeID=d.TransTypeID AND h.VoucherNo=d.VoucherNo
+                        JOIN MsTransType t ON t.id_key=h.TransTypeID
+                        WHERE t.ShortName='MS'
+                          AND ISNULL(h.Cancelled,'N') <> 'Y'
+                          AND d.DrCrIndicator='D' AND d.RemainingAmt > 0
+                          AND d.PartyID LIKE 'D%'
+                    ) ra
+                """),
                 ("N — RemainingAmt collection analysis — customer MS invoices FY25-26", """
                     SELECT
                         SUM(d.Amount)                                              AS total_invoiced,

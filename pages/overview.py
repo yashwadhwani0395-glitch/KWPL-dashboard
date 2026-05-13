@@ -39,15 +39,19 @@ def render():
         WHERE t.ShortName='MS' {NOT_CANCELLED}
           AND d.DrCrIndicator='D' {date_filter}
     """)
-    # Outstanding = current balance, never date-filtered
-    kpi_os = query(f"""
-        SELECT
-            SUM(CASE WHEN d.RemainingAmt > 0 AND d.PartyID IS NOT NULL THEN d.RemainingAmt ELSE 0 END) AS total_outstanding
-        FROM TrVocDetail d
-        JOIN TrVocHead h ON h.TransTypeID=d.TransTypeID AND h.VoucherNo=d.VoucherNo
-        JOIN MsTransType t ON t.id_key=h.TransTypeID
-        WHERE t.ShortName='MS' {NOT_CANCELLED}
-          AND d.DrCrIndicator='D'
+    # Outstanding = net ledger balance (DR-CR) for all D% customer accounts, current state
+    kpi_os = query("""
+        SELECT SUM(net_balance) AS total_outstanding
+        FROM (
+            SELECT d.PartyID,
+                   SUM(CASE WHEN d.DrCrIndicator='D' THEN d.Amount ELSE -d.Amount END) AS net_balance
+            FROM TrVocDetail d
+            JOIN TrVocHead h ON h.TransTypeID=d.TransTypeID AND h.VoucherNo=d.VoucherNo
+            WHERE ISNULL(h.Cancelled,'N') <> 'Y'
+              AND d.PartyID LIKE 'D%'
+            GROUP BY d.PartyID
+            HAVING SUM(CASE WHEN d.DrCrIndicator='D' THEN d.Amount ELSE -d.Amount END) > 0
+        ) sub
     """)
     stock_val = query(f"""
         SELECT SUM(sub.net_bottles * m.MrpBottRate) AS stock_value
@@ -95,16 +99,14 @@ def render():
         GROUP BY YEAR(h.VoucherDate), MONTH(h.VoucherDate)
         ORDER BY yr, mo
     """)
-    # Collections = Amount - RemainingAmt on customer DR lines of MS invoices
+    # Collections = all credits to customer (D%) ledger accounts in the period
     df_coll = query(f"""
         SELECT YEAR(h.VoucherDate) AS yr, MONTH(h.VoucherDate) AS mo,
-               SUM(d.Amount - ISNULL(d.RemainingAmt,0)) AS collections
+               SUM(d.Amount) AS collections
         FROM TrVocDetail d
         JOIN TrVocHead h ON h.TransTypeID=d.TransTypeID AND h.VoucherNo=d.VoucherNo
-        JOIN MsTransType t ON t.id_key=h.TransTypeID
-        WHERE t.ShortName='MS'
-          AND ISNULL(h.Cancelled,'N') <> 'Y'
-          AND d.DrCrIndicator='D' AND d.PartyID LIKE 'D%'
+        WHERE ISNULL(h.Cancelled,'N') <> 'Y'
+          AND d.DrCrIndicator='C' AND d.PartyID LIKE 'D%'
           {date_filter}
         GROUP BY YEAR(h.VoucherDate), MONTH(h.VoucherDate)
         ORDER BY yr, mo

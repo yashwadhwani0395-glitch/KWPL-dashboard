@@ -21,19 +21,16 @@ def render():
     )
 
     # ── KPIs ─────────────────────────────────────────────────────────────────
-    # Collections: sum(Amount - RemainingAmt) on customer (D%) DR lines of MS invoices
+    # Collections = ALL credits to customer (D%) ledger accounts in the period
+    # This includes BR, BP, CE, MS credit notes — whatever credits the customer account
     kpi_coll = query(f"""
         SELECT
-            SUM(d.Amount)                              AS total_invoiced,
-            SUM(ISNULL(d.RemainingAmt, 0))             AS still_outstanding,
-            SUM(d.Amount - ISNULL(d.RemainingAmt, 0)) AS total_collections,
-            COUNT(DISTINCT CAST(h.TransTypeID AS VARCHAR)+'|'+h.VoucherNo) AS invoice_count
+            SUM(d.Amount) AS total_collections,
+            COUNT(DISTINCT CAST(h.TransTypeID AS VARCHAR)+'|'+h.VoucherNo) AS receipt_vouchers
         FROM TrVocDetail d
         JOIN TrVocHead h  ON h.TransTypeID=d.TransTypeID AND h.VoucherNo=d.VoucherNo
-        JOIN MsTransType t ON t.id_key=h.TransTypeID
-        WHERE t.ShortName='MS'
-          AND ISNULL(h.Cancelled,'N') <> 'Y'
-          AND d.DrCrIndicator='D'
+        WHERE ISNULL(h.Cancelled,'N') <> 'Y'
+          AND d.DrCrIndicator='C'
           AND d.PartyID LIKE 'D%'
           {date_filter}
     """)
@@ -52,9 +49,9 @@ def render():
 
     kpi_row([
         {"label": "Total Collections",  "value": kpi_coll["total_collections"][0], "fmt": "inr"},
-        {"label": "Total Invoiced",     "value": kpi_coll["total_invoiced"][0],    "fmt": "inr"},
-        {"label": "Still Outstanding",  "value": kpi_coll["still_outstanding"][0], "fmt": "inr"},
+        {"label": "Receipt Vouchers",   "value": kpi_coll["receipt_vouchers"][0],  "fmt": "qty"},
         {"label": "Total Payments Out", "value": kpi_pay["total_payments"][0],     "fmt": "inr"},
+        {"label": "Payment Vouchers",   "value": kpi_pay["payment_count"][0],      "fmt": "qty"},
     ])
 
     st.divider()
@@ -63,13 +60,11 @@ def render():
     st.subheader("Monthly Collections vs Payments")
     df_coll_m = query(f"""
         SELECT YEAR(h.VoucherDate) AS yr, MONTH(h.VoucherDate) AS mo,
-               SUM(d.Amount - ISNULL(d.RemainingAmt, 0)) AS collections
+               SUM(d.Amount) AS collections
         FROM TrVocDetail d
         JOIN TrVocHead h  ON h.TransTypeID=d.TransTypeID AND h.VoucherNo=d.VoucherNo
-        JOIN MsTransType t ON t.id_key=h.TransTypeID
-        WHERE t.ShortName='MS'
-          AND ISNULL(h.Cancelled,'N') <> 'Y'
-          AND d.DrCrIndicator='D' AND d.PartyID LIKE 'D%'
+        WHERE ISNULL(h.Cancelled,'N') <> 'Y'
+          AND d.DrCrIndicator='C' AND d.PartyID LIKE 'D%'
           {date_filter}
         GROUP BY YEAR(h.VoucherDate), MONTH(h.VoucherDate)
         ORDER BY yr, mo
@@ -119,14 +114,12 @@ def render():
         st.subheader("Top 15 Customers — Collections")
         df_cust_coll = query(f"""
             SELECT TOP 15 p.PartyName AS customer,
-                   SUM(d.Amount - ISNULL(d.RemainingAmt,0)) AS collections
+                   SUM(d.Amount) AS collections
             FROM TrVocDetail d
             JOIN TrVocHead h  ON h.TransTypeID=d.TransTypeID AND h.VoucherNo=d.VoucherNo
-            JOIN MsTransType t ON t.id_key=h.TransTypeID
             JOIN MsPartyMaster p ON p.PartyID=d.PartyID
-            WHERE t.ShortName='MS'
-              AND ISNULL(h.Cancelled,'N') <> 'Y'
-              AND d.DrCrIndicator='D' AND d.PartyID LIKE 'D%'
+            WHERE ISNULL(h.Cancelled,'N') <> 'Y'
+              AND d.DrCrIndicator='C' AND d.PartyID LIKE 'D%'
               {date_filter}
             GROUP BY p.PartyName
             ORDER BY collections DESC
@@ -171,12 +164,11 @@ def render():
     """)
     df_eff_c = query(f"""
         SELECT YEAR(h.VoucherDate) AS yr, MONTH(h.VoucherDate) AS mo,
-               SUM(d.Amount - ISNULL(d.RemainingAmt,0)) AS collected
+               SUM(d.Amount) AS collected
         FROM TrVocDetail d
         JOIN TrVocHead h ON h.TransTypeID=d.TransTypeID AND h.VoucherNo=d.VoucherNo
-        JOIN MsTransType t ON t.id_key=h.TransTypeID
-        WHERE t.ShortName='MS' AND ISNULL(h.Cancelled,'N') <> 'Y'
-          AND d.DrCrIndicator='D' AND d.PartyID LIKE 'D%' {_12m}
+        WHERE ISNULL(h.Cancelled,'N') <> 'Y'
+          AND d.DrCrIndicator='C' AND d.PartyID LIKE 'D%' {_12m}
         GROUP BY YEAR(h.VoucherDate), MONTH(h.VoucherDate)
     """)
     if not df_eff_s.empty:
