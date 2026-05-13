@@ -94,10 +94,14 @@ def render():
                SUM(i.TotalBottleQty) AS bottles
         FROM TrVocHead h
         JOIN TrVocItem i ON i.TransTypeID=h.TransTypeID AND i.VoucherNo=h.VoucherNo
-        JOIN TrVocDetail d ON d.TransTypeID=h.TransTypeID AND d.VoucherNo=h.VoucherNo
-        JOIN MsPartyMaster p ON p.PartyID=d.PartyID
+        JOIN (
+            SELECT d.TransTypeID, d.VoucherNo, MIN(d.PartyID) AS PartyID
+            FROM TrVocDetail d
+            WHERE d.AccHeadID='000003' AND d.PartyID IS NOT NULL
+            GROUP BY d.TransTypeID, d.VoucherNo
+        ) s ON s.TransTypeID=h.TransTypeID AND s.VoucherNo=h.VoucherNo
+        JOIN MsPartyMaster p ON p.PartyID=s.PartyID
         WHERE h.TransTypeID IN ({PURCHASE_IN}) {NOT_CANCELLED} {NOT_FREE}
-          AND d.DrCrIndicator='C'
         GROUP BY p.PartyName ORDER BY purchases DESC
     """)
     if not df_sup.empty:
