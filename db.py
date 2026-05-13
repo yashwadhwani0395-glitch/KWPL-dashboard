@@ -35,5 +35,14 @@ def get_connection():
 
 
 def query(sql: str, params=None) -> pd.DataFrame:
-    with get_connection() as conn:
-        return pd.read_sql(sql, conn, params=params)
+    conn = get_connection()
+    try:
+        cursor = conn.cursor(as_dict=True)
+        cursor.execute(sql, params or ())
+        rows = cursor.fetchall()
+        if not rows:
+            cols = [d[0] for d in cursor.description] if cursor.description else []
+            return pd.DataFrame(columns=cols)
+        return pd.DataFrame(rows)
+    finally:
+        conn.close()
