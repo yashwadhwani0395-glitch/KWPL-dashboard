@@ -95,16 +95,16 @@ def render():
         GROUP BY YEAR(h.VoucherDate), MONTH(h.VoucherDate)
         ORDER BY yr, mo
     """)
-    # Collections = bank/cash debit side of receipt vouchers (DrCrIndicator='D')
+    # Collections = Amount - RemainingAmt on customer DR lines of MS invoices
     df_coll = query(f"""
         SELECT YEAR(h.VoucherDate) AS yr, MONTH(h.VoucherDate) AS mo,
-               SUM(d.Amount) AS collections
+               SUM(d.Amount - ISNULL(d.RemainingAmt,0)) AS collections
         FROM TrVocDetail d
         JOIN TrVocHead h ON h.TransTypeID=d.TransTypeID AND h.VoucherNo=d.VoucherNo
         JOIN MsTransType t ON t.id_key=h.TransTypeID
-        WHERE t.ShortName IN ('BR','CR')
+        WHERE t.ShortName='MS'
           AND ISNULL(h.Cancelled,'N') <> 'Y'
-          AND d.DrCrIndicator='D'
+          AND d.DrCrIndicator='D' AND d.PartyID LIKE 'D%'
           {date_filter}
         GROUP BY YEAR(h.VoucherDate), MONTH(h.VoucherDate)
         ORDER BY yr, mo

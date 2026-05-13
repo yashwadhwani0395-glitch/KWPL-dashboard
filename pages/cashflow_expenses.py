@@ -7,58 +7,94 @@ from components.kpi_cards import kpi_row
 from components.charts import bar_chart, grouped_bar, pie_chart, area_chart
 
 
-RECEIPT_IN = "'BR','CR'"
 PAYMENT_IN = "'BP','CE'"
-COLL_IND   = "D"   # bank/cash debit = money received
-PAY_IND    = "D"   # expense/supplier debit = money paid out
 
 
 def render():
     st.header("Cash Flow & Expenses")
     date_filter = st.session_state.get("date_filter", "")
 
-    # ── KPIs — single query ───────────────────────────────────────────────────
-    kpi = query(f"""
+    st.info(
+        "Collections = amount collected from customer invoices raised in the selected period "
+        "(derived from invoice balances in the ERP). Payments = Bank Payment + Cash Payment vouchers.",
+        icon="ℹ️"
+    )
+
+    # ── KPIs ─────────────────────────────────────────────────────────────────
+    # Collections: sum(Amount - RemainingAmt) on customer (D%) DR lines of MS invoices
+    kpi_coll = query(f"""
         SELECT
-            SUM(CASE WHEN t.ShortName IN ({RECEIPT_IN}) AND d.DrCrIndicator='{COLL_IND}' THEN d.Amount ELSE 0 END) AS total_collections,
-            SUM(CASE WHEN t.ShortName IN ({PAYMENT_IN}) AND d.DrCrIndicator='{PAY_IND}'  THEN d.Amount ELSE 0 END) AS total_payments,
-            COUNT(DISTINCT CASE WHEN t.ShortName IN ({RECEIPT_IN}) THEN CAST(h.TransTypeID AS VARCHAR)+'|'+h.VoucherNo END) AS receipt_count,
-            COUNT(DISTINCT CASE WHEN t.ShortName IN ({PAYMENT_IN}) THEN CAST(h.TransTypeID AS VARCHAR)+'|'+h.VoucherNo END) AS payment_count
+            SUM(d.Amount)                              AS total_invoiced,
+            SUM(ISNULL(d.RemainingAmt, 0))             AS still_outstanding,
+            SUM(d.Amount - ISNULL(d.RemainingAmt, 0)) AS total_collections,
+            COUNT(DISTINCT CAST(h.TransTypeID AS VARCHAR)+'|'+h.VoucherNo) AS invoice_count
         FROM TrVocDetail d
         JOIN TrVocHead h  ON h.TransTypeID=d.TransTypeID AND h.VoucherNo=d.VoucherNo
         JOIN MsTransType t ON t.id_key=h.TransTypeID
-        WHERE ISNULL(h.Cancelled,'N') <> 'Y'
-          AND t.ShortName IN ({RECEIPT_IN},{PAYMENT_IN})
+        WHERE t.ShortName='MS'
+          AND ISNULL(h.Cancelled,'N') <> 'Y'
+          AND d.DrCrIndicator='D'
+          AND d.PartyID LIKE 'D%'
           {date_filter}
     """)
+    kpi_pay = query(f"""
+        SELECT
+            SUM(d.Amount) AS total_payments,
+            COUNT(DISTINCT CAST(h.TransTypeID AS VARCHAR)+'|'+h.VoucherNo) AS payment_count
+        FROM TrVocDetail d
+        JOIN TrVocHead h  ON h.TransTypeID=d.TransTypeID AND h.VoucherNo=d.VoucherNo
+        JOIN MsTransType t ON t.id_key=h.TransTypeID
+        WHERE t.ShortName IN ({PAYMENT_IN})
+          AND ISNULL(h.Cancelled,'N') <> 'Y'
+          AND d.DrCrIndicator='D'
+          {date_filter}
+    """)
+
     kpi_row([
-        {"label": "Total Collections", "value": kpi["total_collections"][0], "fmt": "inr"},
-        {"label": "Total Payments",    "value": kpi["total_payments"][0],    "fmt": "inr"},
-        {"label": "Receipt Vouchers",  "value": kpi["receipt_count"][0],     "fmt": "qty"},
-        {"label": "Payment Vouchers",  "value": kpi["payment_count"][0],     "fmt": "qty"},
+        {"label": "Total Collections",  "value": kpi_coll["total_collections"][0], "fmt": "inr"},
+        {"label": "Total Invoiced",     "value": kpi_coll["total_invoiced"][0],    "fmt": "inr"},
+        {"label": "Still Outstanding",  "value": kpi_coll["still_outstanding"][0], "fmt": "inr"},
+        {"label": "Total Payments Out", "value": kpi_pay["total_payments"][0],     "fmt": "inr"},
     ])
 
     st.divider()
 
     # ── Monthly collections vs payments ──────────────────────────────────────
     st.subheader("Monthly Collections vs Payments")
-    df_cf = query(f"""
-        SELECT
-            YEAR(h.VoucherDate) AS yr, MONTH(h.VoucherDate) AS mo,
-            SUM(CASE WHEN t.ShortName IN ({RECEIPT_IN}) AND d.DrCrIndicator='{COLL_IND}'
-                THEN d.Amount ELSE 0 END) AS collections,
-            SUM(CASE WHEN t.ShortName IN ({PAYMENT_IN}) AND d.DrCrIndicator='{PAY_IND}'
-                THEN d.Amount ELSE 0 END) AS payments
+    df_coll_m = query(f"""
+        SELECT YEAR(h.VoucherDate) AS yr, MONTH(h.VoucherDate) AS mo,
+               SUM(d.Amount - ISNULL(d.RemainingAmt, 0)) AS collections
         FROM TrVocDetail d
         JOIN TrVocHead h  ON h.TransTypeID=d.TransTypeID AND h.VoucherNo=d.VoucherNo
         JOIN MsTransType t ON t.id_key=h.TransTypeID
-        WHERE ISNULL(h.Cancelled,'N') <> 'Y'
+        WHERE t.ShortName='MS'
+          AND ISNULL(h.Cancelled,'N') <> 'Y'
+          AND d.DrCrIndicator='D' AND d.PartyID LIKE 'D%'
           {date_filter}
         GROUP BY YEAR(h.VoucherDate), MONTH(h.VoucherDate)
         ORDER BY yr, mo
     """)
-    if not df_cf.empty:
-        df_cf = month_col(df_cf)
+    df_pay_m = query(f"""
+        SELECT YEAR(h.VoucherDate) AS yr, MONTH(h.VoucherDate) AS mo,
+               SUM(d.Amount) AS payments
+        FROM TrVocDetail d
+        JOIN TrVocHead h  ON h.TransTypeID=d.TransTypeID AND h.VoucherNo=d.VoucherNo
+        JOIN MsTransType t ON t.id_key=h.TransTypeID
+        WHERE t.ShortName IN ({PAYMENT_IN})
+          AND ISNULL(h.Cancelled,'N') <> 'Y'
+          AND d.DrCrIndicator='D'
+          {date_filter}
+        GROUP BY YEAR(h.VoucherDate), MONTH(h.VoucherDate)
+        ORDER BY yr, mo
+    """)
+    if not df_coll_m.empty:
+        df_coll_m = month_col(df_coll_m)
+        if not df_pay_m.empty:
+            df_pay_m = month_col(df_pay_m)
+            df_cf = df_coll_m.merge(df_pay_m[["month", "payments"]], on="month", how="outer").fillna(0)
+        else:
+            df_cf = df_coll_m.copy()
+            df_cf["payments"] = 0
         df_cf["net"] = df_cf["collections"] - df_cf["payments"]
         st.plotly_chart(
             grouped_bar(df_cf, x="month", series=[
@@ -80,24 +116,25 @@ def render():
     col_l, col_r = st.columns(2)
 
     with col_l:
-        st.subheader("Collections by Salesman")
-        df_sm_coll = query(f"""
-            SELECT s.FullName AS salesman, SUM(d.Amount) AS collections
+        st.subheader("Top 15 Customers — Collections")
+        df_cust_coll = query(f"""
+            SELECT TOP 15 p.PartyName AS customer,
+                   SUM(d.Amount - ISNULL(d.RemainingAmt,0)) AS collections
             FROM TrVocDetail d
             JOIN TrVocHead h  ON h.TransTypeID=d.TransTypeID AND h.VoucherNo=d.VoucherNo
             JOIN MsTransType t ON t.id_key=h.TransTypeID
-            JOIN MsSalesmanMaster s ON s.SalesManID=h.SalesManID
-            WHERE t.ShortName IN ({RECEIPT_IN})
-              AND d.DrCrIndicator='{COLL_IND}'
+            JOIN MsPartyMaster p ON p.PartyID=d.PartyID
+            WHERE t.ShortName='MS'
               AND ISNULL(h.Cancelled,'N') <> 'Y'
-              AND s.ResignDate IS NULL
+              AND d.DrCrIndicator='D' AND d.PartyID LIKE 'D%'
               {date_filter}
-            GROUP BY s.FullName ORDER BY collections DESC
+            GROUP BY p.PartyName
+            ORDER BY collections DESC
         """)
-        if not df_sm_coll.empty:
-            st.plotly_chart(bar_chart(df_sm_coll, x="salesman", y="collections",
-                                      color_scale="Greens"),
-                            use_container_width=True, key="cf_sm_coll")
+        if not df_cust_coll.empty:
+            st.plotly_chart(bar_chart(df_cust_coll, x="customer", y="collections",
+                                      orientation="h", color_scale="Greens"),
+                            use_container_width=True, key="cf_cust_coll")
 
     with col_r:
         st.subheader("Payments by Type")
@@ -107,7 +144,7 @@ def render():
             JOIN TrVocHead h  ON h.TransTypeID=d.TransTypeID AND h.VoucherNo=d.VoucherNo
             JOIN MsTransType t ON t.id_key=h.TransTypeID
             WHERE t.ShortName IN ({PAYMENT_IN})
-              AND d.DrCrIndicator='{PAY_IND}'
+              AND d.DrCrIndicator='D'
               AND ISNULL(h.Cancelled,'N') <> 'Y'
               {date_filter}
             GROUP BY t.TransTypeName ORDER BY payments DESC
@@ -121,63 +158,38 @@ def render():
 
     # ── Collection efficiency ─────────────────────────────────────────────────
     st.subheader("Collection Efficiency — Last 12 Months")
-    df_eff_sales = query(f"""
+    _12m = "AND h.VoucherDate >= DATEADD(MONTH,-12,GETDATE())"
+    df_eff_s = query(f"""
         SELECT YEAR(h.VoucherDate) AS yr, MONTH(h.VoucherDate) AS mo,
                SUM(i.TotalAmount) AS sales
         FROM TrVocHead h
         JOIN TrVocItem i ON i.TransTypeID=h.TransTypeID AND i.VoucherNo=h.VoucherNo
         JOIN MsTransType t ON t.id_key=h.TransTypeID
-        WHERE t.ShortName='MS' {NOT_CANCELLED} {NOT_FREE}
-          AND h.VoucherDate >= DATEADD(MONTH,-12,GETDATE())
+        WHERE t.ShortName='MS' AND ISNULL(h.Cancelled,'N') <> 'Y'
+          AND ISNULL(i.FreeItemYN,'N') <> 'Y' {_12m}
         GROUP BY YEAR(h.VoucherDate), MONTH(h.VoucherDate)
     """)
-    df_eff_coll = query(f"""
+    df_eff_c = query(f"""
         SELECT YEAR(h.VoucherDate) AS yr, MONTH(h.VoucherDate) AS mo,
-               SUM(d.Amount) AS collections
+               SUM(d.Amount - ISNULL(d.RemainingAmt,0)) AS collected
         FROM TrVocDetail d
-        JOIN TrVocHead h  ON h.TransTypeID=d.TransTypeID AND h.VoucherNo=d.VoucherNo
+        JOIN TrVocHead h ON h.TransTypeID=d.TransTypeID AND h.VoucherNo=d.VoucherNo
         JOIN MsTransType t ON t.id_key=h.TransTypeID
-        WHERE t.ShortName IN ({RECEIPT_IN})
-          AND d.DrCrIndicator='{COLL_IND}'
-          AND ISNULL(h.Cancelled,'N') <> 'Y'
-          AND h.VoucherDate >= DATEADD(MONTH,-12,GETDATE())
+        WHERE t.ShortName='MS' AND ISNULL(h.Cancelled,'N') <> 'Y'
+          AND d.DrCrIndicator='D' AND d.PartyID LIKE 'D%' {_12m}
         GROUP BY YEAR(h.VoucherDate), MONTH(h.VoucherDate)
     """)
-    if not df_eff_sales.empty:
-        df_eff_sales = month_col(df_eff_sales)
-        if not df_eff_coll.empty:
-            df_eff_coll = month_col(df_eff_coll)
-            df_eff = df_eff_sales.merge(df_eff_coll[["month","collections"]],
-                                        on="month", how="left").fillna(0)
+    if not df_eff_s.empty:
+        df_eff_s = month_col(df_eff_s)
+        if not df_eff_c.empty:
+            df_eff_c = month_col(df_eff_c)
+            df_eff = df_eff_s.merge(df_eff_c[["month","collected"]], on="month", how="left").fillna(0)
         else:
-            df_eff = df_eff_sales.copy()
-            df_eff["collections"] = 0
+            df_eff = df_eff_s.copy(); df_eff["collected"] = 0
         st.plotly_chart(
             grouped_bar(df_eff, x="month", series=[
-                {"col": "sales",       "name": "Sales",       "color": COLORS["sales"]},
-                {"col": "collections", "name": "Collections", "color": COLORS["collection"]},
+                {"col": "sales",     "name": "Sales",     "color": COLORS["sales"]},
+                {"col": "collected", "name": "Collected", "color": COLORS["collection"]},
             ]),
             use_container_width=True, key="cf_efficiency"
         )
-
-    st.divider()
-
-    # ── Top payers ────────────────────────────────────────────────────────────
-    st.subheader("Top 15 Customers by Collections")
-    df_top_pay = query(f"""
-        SELECT TOP 15 p.PartyName AS customer, SUM(d.Amount) AS collections
-        FROM TrVocDetail d
-        JOIN TrVocHead h  ON h.TransTypeID=d.TransTypeID AND h.VoucherNo=d.VoucherNo
-        JOIN MsTransType t ON t.id_key=h.TransTypeID
-        JOIN MsPartyMaster p ON p.PartyID=d.PartyID
-        WHERE t.ShortName IN ({RECEIPT_IN})
-          AND d.DrCrIndicator='C'
-          AND d.PartyID IS NOT NULL
-          AND ISNULL(h.Cancelled,'N') <> 'Y'
-          {date_filter}
-        GROUP BY p.PartyName ORDER BY collections DESC
-    """)
-    if not df_top_pay.empty:
-        st.plotly_chart(bar_chart(df_top_pay, x="customer", y="collections",
-                                  orientation="h", color_scale="Greens"),
-                        use_container_width=True, key="cf_top_payers")

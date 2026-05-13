@@ -153,10 +153,53 @@ def render():
 
     # ── Tab 3: Diagnostics ────────────────────────────────────────────────────
     with tab_diag:
-        st.subheader("Live Diagnostics — Collections / Sales / Outstanding")
-        st.caption("Runs targeted queries across all transaction types. Download all results as ZIP.")
 
-        DIAG_SECTIONS = [
+        @st.fragment
+        def _diag_panel():
+            st.subheader("Live Diagnostics — Collections / Sales / Outstanding")
+            st.caption("Runs targeted queries. Download all results as ZIP.")
+
+            DIAG_SECTIONS = [
+                ("M — BP/CE party+DrCr breakdown FY25-26 (find collections)", """
+                    SELECT t.ShortName, d.DrCrIndicator,
+                           CASE WHEN d.PartyID LIKE 'D%' THEN 'Customer (D-prefix)'
+                                WHEN d.PartyID LIKE 'C%' THEN 'Supplier (C-prefix)'
+                                WHEN d.PartyID IS NULL   THEN 'No Party (Bank/GL)'
+                                ELSE 'Other: '+LEFT(d.PartyID,1) END AS party_type,
+                           COUNT(DISTINCT CAST(h.TransTypeID AS VARCHAR)+'|'+h.VoucherNo) AS vouchers,
+                           SUM(d.Amount) AS total_amount
+                    FROM TrVocDetail d
+                    JOIN TrVocHead h  ON h.TransTypeID=d.TransTypeID AND h.VoucherNo=d.VoucherNo
+                    JOIN MsTransType t ON t.id_key=h.TransTypeID
+                    WHERE t.ShortName IN ('BP','CE')
+                      AND ISNULL(h.Cancelled,'N') <> 'Y'
+                      AND h.VoucherDate >= '2025-04-01'
+                      AND h.VoucherDate <  '2026-04-01'
+                    GROUP BY t.ShortName, d.DrCrIndicator,
+                             CASE WHEN d.PartyID LIKE 'D%' THEN 'Customer (D-prefix)'
+                                  WHEN d.PartyID LIKE 'C%' THEN 'Supplier (C-prefix)'
+                                  WHEN d.PartyID IS NULL   THEN 'No Party (Bank/GL)'
+                                  ELSE 'Other: '+LEFT(d.PartyID,1) END
+                    ORDER BY total_amount DESC
+                """),
+                ("N — RemainingAmt collection analysis — customer MS invoices FY25-26", """
+                    SELECT
+                        SUM(d.Amount)                                              AS total_invoiced,
+                        SUM(ISNULL(d.RemainingAmt,0))                             AS still_outstanding,
+                        SUM(d.Amount - ISNULL(d.RemainingAmt,0))                  AS collected,
+                        COUNT(*)                                                   AS invoice_lines,
+                        COUNT(CASE WHEN ISNULL(d.RemainingAmt,0)=0 THEN 1 END)    AS fully_paid_lines,
+                        COUNT(CASE WHEN ISNULL(d.RemainingAmt,0)>0 THEN 1 END)    AS partly_outstanding_lines
+                    FROM TrVocDetail d
+                    JOIN TrVocHead h ON h.TransTypeID=d.TransTypeID AND h.VoucherNo=d.VoucherNo
+                    JOIN MsTransType t ON t.id_key=h.TransTypeID
+                    WHERE t.ShortName='MS'
+                      AND ISNULL(h.Cancelled,'N') <> 'Y'
+                      AND d.DrCrIndicator='D'
+                      AND d.PartyID LIKE 'D%'
+                      AND h.VoucherDate >= '2025-04-01'
+                      AND h.VoucherDate <  '2026-04-01'
+                """),
             ("L — ALL transaction types with totals FY25-26 (find collections)", """
                 SELECT t.ShortName, t.TransTypeName,
                        COUNT(DISTINCT h.VoucherNo)                                   AS vouchers,
@@ -298,45 +341,44 @@ def render():
                   AND ISNULL(h.Cancelled,'N') <> 'Y'
                 ORDER BY h.VoucherDate DESC
             """),
-        ]
+            ]
 
-        import io, zipfile
+            import io, zipfile
 
-        col_run, col_dl = st.columns([1, 1])
+            col_run, col_dl = st.columns([1, 1])
+            with col_run:
+                run_clicked = st.button("▶ Run Diagnostics", type="primary", use_container_width=True)
+            with col_dl:
+                if "diag_results" in st.session_state:
+                    buf = io.BytesIO()
+                    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+                        for title, df in st.session_state["diag_results"].items():
+                            safe = title.replace(" ", "_").replace("—", "-")[:50]
+                            zf.writestr(f"{safe}.csv", df.to_csv(index=False))
+                    st.download_button(
+                        label="⬇️ Download Results (.zip)",
+                        data=buf.getvalue(),
+                        file_name="kwpl_diagnostics.zip",
+                        mime="application/zip",
+                        use_container_width=True,
+                    )
+                else:
+                    st.button("⬇️ Download Results (.zip)", disabled=True, use_container_width=True)
 
-        with col_run:
-            run_clicked = st.button("▶ Run Diagnostics", type="primary", use_container_width=True)
+            if run_clicked:
+                with st.spinner("Running diagnostics…"):
+                    results = {}
+                    for title, sql in DIAG_SECTIONS:
+                        try:
+                            results[title] = query(sql)
+                        except Exception as e:
+                            results[title] = pd.DataFrame([{"ERROR": str(e)}])
+                    st.session_state["diag_results"] = results
 
-        with col_dl:
             if "diag_results" in st.session_state:
-                buf = io.BytesIO()
-                with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
-                    for title, df in st.session_state["diag_results"].items():
-                        safe = title.replace(" ", "_").replace("—", "-")[:50]
-                        zf.writestr(f"{safe}.csv", df.to_csv(index=False))
-                st.download_button(
-                    label="⬇️ Download Results (.zip)",
-                    data=buf.getvalue(),
-                    file_name="kwpl_diagnostics.zip",
-                    mime="application/zip",
-                    use_container_width=True,
-                )
-            else:
-                st.button("⬇️ Download Results (.zip)", disabled=True, use_container_width=True)
+                st.divider()
+                for title, df in st.session_state["diag_results"].items():
+                    st.markdown(f"### {title}")
+                    st.dataframe(df, use_container_width=True, hide_index=True)
 
-        if run_clicked:
-            with st.spinner("Running diagnostics…"):
-                results = {}
-                for title, sql in DIAG_SECTIONS:
-                    try:
-                        results[title] = query(sql)
-                    except Exception as e:
-                        results[title] = pd.DataFrame([{"ERROR": str(e)}])
-                st.session_state["diag_results"] = results
-                st.rerun()
-
-        if "diag_results" in st.session_state:
-            st.divider()
-            for title, df in st.session_state["diag_results"].items():
-                st.markdown(f"### {title}")
-                st.dataframe(df, use_container_width=True, hide_index=True)
+        _diag_panel()
