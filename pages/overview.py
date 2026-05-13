@@ -39,11 +39,21 @@ def render():
         WHERE h.TransTypeID IN ({SALES_IN}) {NOT_CANCELLED}
           AND d.DrCrIndicator='D' AND d.RemainingAmt > 0
     """)
-    stock_val = query("""
-        SELECT SUM(o.ClosingQty * m.MrpBottRate) AS stock_value
-        FROM MsItemBatchOpening o
-        JOIN MsItemMaster m ON m.ItemID = o.ItemID
-        WHERE o.ClosingQty > 0
+    stock_val = query(f"""
+        SELECT SUM(sub.net_bottles * m.MrpBottRate) AS stock_value
+        FROM (
+            SELECT vi.ItemID,
+                   SUM(CASE WHEN h.TransTypeID IN ({PURCHASE_IN})
+                            THEN vi.TotalBottleQty
+                            ELSE -vi.TotalBottleQty END) AS net_bottles
+            FROM TrVocItem vi
+            JOIN TrVocHead h ON h.TransTypeID=vi.TransTypeID AND h.VoucherNo=vi.VoucherNo
+            WHERE h.TransTypeID IN ({PURCHASE_IN},{SALES_IN})
+              {NOT_CANCELLED} AND vi.FreeItemYN <> 'Y'
+            GROUP BY vi.ItemID
+        ) sub
+        JOIN MsItemMaster m ON m.ItemID = sub.ItemID
+        WHERE sub.net_bottles > 0
     """)
 
     kpi_row([

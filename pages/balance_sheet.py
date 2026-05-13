@@ -49,12 +49,21 @@ def render():
         WHERE h.TransTypeID IN ({PURCHASE_IN}) {NOT_CANCELLED}
           AND d.DrCrIndicator='C' AND d.RemainingAmt > 0
     """)
-    stock_val = query("""
-        SELECT SUM(o.ClosingQty * m.MrpBottRate) AS mrp,
-               SUM(o.ClosingQty * m.PurchaseRate) AS cost
-        FROM MsItemBatchOpening o
-        JOIN MsItemMaster m ON m.ItemID=o.ItemID
-        WHERE o.ClosingQty > 0
+    stock_val = query(f"""
+        SELECT SUM(sub.net_bottles * m.MrpBottRate) AS mrp
+        FROM (
+            SELECT vi.ItemID,
+                   SUM(CASE WHEN h.TransTypeID IN ({PURCHASE_IN})
+                            THEN vi.TotalBottleQty
+                            ELSE -vi.TotalBottleQty END) AS net_bottles
+            FROM TrVocItem vi
+            JOIN TrVocHead h ON h.TransTypeID=vi.TransTypeID AND h.VoucherNo=vi.VoucherNo
+            WHERE h.TransTypeID IN ({PURCHASE_IN},{SALES_IN})
+              {NOT_CANCELLED} AND vi.FreeItemYN <> 'Y'
+            GROUP BY vi.ItemID
+        ) sub
+        JOIN MsItemMaster m ON m.ItemID = sub.ItemID
+        WHERE sub.net_bottles > 0
     """)
 
     rev_val  = float(revenue["value"][0]  or 0)
@@ -69,7 +78,7 @@ def render():
          "delta": f"{gp_pct:.1f}% GP%"},
         {"label": "Receivables",        "value": receivables["value"][0],         "fmt": "inr"},
         {"label": "Payables",           "value": payables["value"][0],            "fmt": "inr"},
-        {"label": "Stock (Cost)",       "value": stock_val["cost"][0],            "fmt": "inr"},
+        {"label": "Stock (MRP Value)",   "value": stock_val["mrp"][0],             "fmt": "inr"},
     ])
 
     st.divider()
@@ -120,10 +129,10 @@ def render():
     # ── Working capital ───────────────────────────────────────────────────────
     st.subheader("Working Capital Components")
     wc_data = {
-        "Component":    ["Receivables", "Stock (Cost)", "Payables"],
+        "Component":    ["Receivables", "Stock (MRP)", "Payables"],
         "Amount":       [
             float(receivables["value"][0] or 0),
-            float(stock_val["cost"][0]    or 0),
+            float(stock_val["mrp"][0]     or 0),
             float(payables["value"][0]    or 0),
         ],
         "Type":         ["Asset", "Asset", "Liability"],
