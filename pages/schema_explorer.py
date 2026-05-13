@@ -434,19 +434,84 @@ def render():
                 GROUP BY t.ShortName, t.TransTypeName
                 ORDER BY total_dr_amount DESC
             """),
-            ("U — Opening balance tables for D% customers (find missing ₹1.1 Cr gap)", """
-                SELECT 'MsPartyOpeningBalance' AS tbl_check,
-                       COUNT(*) AS rows,
-                       SUM(CASE WHEN DrCrIndicator='D' THEN Amount ELSE 0 END) AS opening_dr,
-                       SUM(CASE WHEN DrCrIndicator='C' THEN Amount ELSE 0 END) AS opening_cr
-                FROM MsPartyOpeningBalance
+            ("U — MsPartyOpening columns and D% summary (opening balances)", """
+                SELECT COLUMN_NAME, DATA_TYPE
+                FROM INFORMATION_SCHEMA.COLUMNS
+                WHERE TABLE_NAME='MsPartyOpening'
+                ORDER BY ORDINAL_POSITION
+            """),
+            ("U2 — MsPartyOpening sample rows", """
+                SELECT TOP 20 * FROM MsPartyOpening ORDER BY 1
+            """),
+            ("U3 — MsPartyOpening totals for D% customers", """
+                SELECT
+                    COUNT(*) AS rows,
+                    COUNT(DISTINCT PartyID) AS distinct_parties,
+                    SUM(CASE WHEN DrCrIndicator='D' THEN Amount ELSE 0 END) AS total_dr,
+                    SUM(CASE WHEN DrCrIndicator='C' THEN Amount ELSE 0 END) AS total_cr,
+                    SUM(CASE WHEN DrCrIndicator='D' THEN Amount ELSE -Amount END) AS net_balance
+                FROM MsPartyOpening
                 WHERE PartyID LIKE 'D%'
-                UNION ALL
-                SELECT 'MsPartyOpeningBalance_ALL' AS tbl_check,
-                       COUNT(*) AS rows,
-                       SUM(CASE WHEN DrCrIndicator='D' THEN Amount ELSE 0 END) AS opening_dr,
-                       SUM(CASE WHEN DrCrIndicator='C' THEN Amount ELSE 0 END) AS opening_cr
-                FROM MsPartyOpeningBalance
+            """),
+            ("U4 — Outstanding with opening balance: TrVocDetail net + MsPartyOpening net", """
+                SELECT
+                    COUNT(*) AS debtor_count,
+                    SUM(net_balance) AS total_outstanding
+                FROM (
+                    SELECT PartyID,
+                           SUM(CASE WHEN DrCrIndicator='D' THEN Amount ELSE -Amount END) AS net_balance
+                    FROM (
+                        SELECT d.PartyID, d.DrCrIndicator, d.Amount
+                        FROM TrVocDetail d
+                        JOIN TrVocHead h ON h.TransTypeID=d.TransTypeID AND h.VoucherNo=d.VoucherNo
+                        WHERE ISNULL(h.Cancelled,'N') <> 'Y'
+                          AND d.PartyID LIKE 'D%'
+                          AND h.VoucherDate < '2026-04-01'
+                        UNION ALL
+                        SELECT PartyID, DrCrIndicator, Amount
+                        FROM MsPartyOpening
+                        WHERE PartyID LIKE 'D%'
+                    ) combined
+                    GROUP BY PartyID
+                ) sub
+                WHERE net_balance > 0
+            """),
+            ("X — Sample CE vouchers that debit D% customers (what are they?)", """
+                SELECT TOP 20
+                    h.VoucherDate, h.VoucherNo, t.TransTypeName,
+                    d.DrCrIndicator, d.Amount, d.PartyID,
+                    p.PartyName
+                FROM TrVocDetail d
+                JOIN TrVocHead h ON h.TransTypeID=d.TransTypeID AND h.VoucherNo=d.VoucherNo
+                JOIN MsTransType t ON t.id_key=h.TransTypeID
+                JOIN MsPartyMaster p ON p.PartyID=d.PartyID
+                WHERE t.ShortName='CE'
+                  AND ISNULL(h.Cancelled,'N') <> 'Y'
+                  AND d.DrCrIndicator='D'
+                  AND d.PartyID LIKE 'D%'
+                ORDER BY d.Amount DESC
+            """),
+            ("X2 — All lines of a single CE voucher that debits a D% customer", """
+                SELECT d.DrCrIndicator, d.Amount, d.PartyID, p.PartyName,
+                       d.AccountID, a.AccountHeadName
+                FROM TrVocDetail d
+                JOIN TrVocHead h ON h.TransTypeID=d.TransTypeID AND h.VoucherNo=d.VoucherNo
+                JOIN MsTransType t ON t.id_key=h.TransTypeID
+                LEFT JOIN MsPartyMaster p ON p.PartyID=d.PartyID
+                LEFT JOIN MsAccountHead a ON a.AccountHeadID=d.AccountID
+                WHERE h.VoucherNo = (
+                    SELECT TOP 1 h2.VoucherNo
+                    FROM TrVocDetail d2
+                    JOIN TrVocHead h2 ON h2.TransTypeID=d2.TransTypeID AND h2.VoucherNo=d2.VoucherNo
+                    JOIN MsTransType t2 ON t2.id_key=h2.TransTypeID
+                    WHERE t2.ShortName='CE'
+                      AND ISNULL(h2.Cancelled,'N') <> 'Y'
+                      AND d2.DrCrIndicator='D'
+                      AND d2.PartyID LIKE 'D%'
+                    ORDER BY d2.Amount DESC
+                )
+                  AND t.ShortName='CE'
+                ORDER BY d.Amount DESC
             """),
             ("V — Opening balance tables existence check", """
                 SELECT TABLE_NAME
