@@ -406,6 +406,34 @@ def render():
                   AND ISNULL(h.Cancelled,'N') <> 'Y'
                 ORDER BY h.VoucherDate DESC
             """),
+            ("S — YR Wines (D06428) all-time ledger breakdown by voucher type", """
+                SELECT t.ShortName, t.TransTypeName, d.DrCrIndicator,
+                       COUNT(DISTINCT h.VoucherNo) AS vouchers,
+                       SUM(d.Amount) AS amount
+                FROM TrVocDetail d
+                JOIN TrVocHead h ON h.TransTypeID=d.TransTypeID AND h.VoucherNo=d.VoucherNo
+                JOIN MsTransType t ON t.id_key=h.TransTypeID
+                WHERE ISNULL(h.Cancelled,'N') <> 'Y'
+                  AND d.PartyID = 'D06428'
+                  AND h.VoucherDate < '2026-04-01'
+                GROUP BY t.ShortName, t.TransTypeName, d.DrCrIndicator
+                ORDER BY amount DESC
+            """),
+            ("T — ALL transaction types that create DR entries to D% customers (all-time to 31.03.2026)", """
+                SELECT t.ShortName, t.TransTypeName,
+                       COUNT(DISTINCT d.PartyID) AS customers_affected,
+                       COUNT(DISTINCT CAST(h.TransTypeID AS VARCHAR)+'|'+h.VoucherNo) AS vouchers,
+                       SUM(d.Amount) AS total_dr_amount
+                FROM TrVocDetail d
+                JOIN TrVocHead h ON h.TransTypeID=d.TransTypeID AND h.VoucherNo=d.VoucherNo
+                JOIN MsTransType t ON t.id_key=h.TransTypeID
+                WHERE ISNULL(h.Cancelled,'N') <> 'Y'
+                  AND d.DrCrIndicator='D'
+                  AND d.PartyID LIKE 'D%'
+                  AND h.VoucherDate < '2026-04-01'
+                GROUP BY t.ShortName, t.TransTypeName
+                ORDER BY total_dr_amount DESC
+            """),
             ]
 
             import io, zipfile
