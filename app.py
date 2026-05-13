@@ -9,6 +9,12 @@ st.set_page_config(
 
 st.title(f"🍷 {COMPANY_NAME} — Dashboard")
 
+with st.sidebar:
+    st.caption("Data is cached for 5 minutes.")
+    if st.button("🔄 Refresh Data", use_container_width=True):
+        st.cache_data.clear()
+        st.rerun()
+
 from pages import overview, sales, purchases_stock, debtors_ageing, cashflow_expenses, balance_sheet
 from pages import schema_explorer
 
