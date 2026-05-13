@@ -9,9 +9,9 @@ PAYMENT_CODES = ('BP', 'CE')
 SALES_IN    = ",".join(str(x) for x in SALES_TYPES)
 PURCHASE_IN = ",".join(str(x) for x in PURCHASE_TYPES)
 
-# SQL filter fragments
-NOT_CANCELLED = "AND h.Cancelled <> 'Y'"
-NOT_FREE      = "AND i.FreeItemYN <> 'Y'"
+# SQL filter fragments — ISNULL handles vouchers where field is NULL (not just 'N')
+NOT_CANCELLED = "AND ISNULL(h.Cancelled,'N') <> 'Y'"
+NOT_FREE      = "AND ISNULL(i.FreeItemYN,'N') <> 'Y'"
 
 # ── Brand → Principal mapping (verified from live brands.csv) ─────────────────
 # BrandIDs for each principal — used to generate SQL CASE statements

@@ -125,13 +125,37 @@ def render():
     """)
 
     # ── Diagnostics (temporary) ───────────────────────────────────────────────
-    with st.expander("🔍 Debug: Collections & Date Range", expanded=False):
+    with st.expander("🔍 Debug: Collections & Sales mapping", expanded=False):
         diag_dates = query("""
             SELECT MIN(VoucherDate) AS min_date, MAX(VoucherDate) AS max_date,
                    COUNT(*) AS total_vouchers
             FROM TrVocHead
         """)
         st.write("**All vouchers date range:**", diag_dates)
+
+        diag_sales_cmp = query(f"""
+            SELECT
+                SUM(CASE WHEN t.ShortName='MS' THEN i.TotalAmount ELSE 0 END) AS sales_via_shortname,
+                SUM(CASE WHEN h.TransTypeID IN ({SALES_IN}) THEN i.TotalAmount ELSE 0 END) AS sales_via_typeid
+            FROM TrVocHead h
+            JOIN TrVocItem i ON i.TransTypeID=h.TransTypeID AND i.VoucherNo=h.VoucherNo
+            JOIN MsTransType t ON t.id_key=h.TransTypeID
+            WHERE (t.ShortName='MS' OR h.TransTypeID IN ({SALES_IN}))
+              {date_filter}
+        """)
+        st.write("**Sales total: ShortName='MS' vs TransTypeID list:**", diag_sales_cmp)
+
+        diag_ms_types = query(f"""
+            SELECT t.id_key, t.ShortName, t.TypeName,
+                   SUM(i.TotalAmount) AS sales
+            FROM TrVocHead h
+            JOIN TrVocItem i ON i.TransTypeID=h.TransTypeID AND i.VoucherNo=h.VoucherNo
+            JOIN MsTransType t ON t.id_key=h.TransTypeID
+            WHERE t.ShortName='MS' {date_filter}
+            GROUP BY t.id_key, t.ShortName, t.TypeName
+            ORDER BY sales DESC
+        """)
+        st.write("**All MS TransTypeIDs and their sales:**", diag_ms_types)
 
         diag_rc = query("""
             SELECT t.ShortName, COUNT(*) AS voucher_count
@@ -140,9 +164,9 @@ def render():
             WHERE t.ShortName IN ('BR','CR','BP','CE')
             GROUP BY t.ShortName
         """)
-        st.write("**BR/CR/BP/CE voucher counts (no date filter):**", diag_rc)
+        st.write("**BR/CR voucher counts (no date filter):**", diag_rc)
 
-        diag_coll_raw = query(f"""
+        diag_coll_raw = query("""
             SELECT TOP 20 h.VoucherDate, h.TransTypeID, t.ShortName,
                    d.DrCrIndicator, d.PartyID, d.Amount
             FROM TrVocDetail d
@@ -151,9 +175,9 @@ def render():
             WHERE t.ShortName IN ('BR','CR')
             ORDER BY h.VoucherDate DESC
         """)
-        st.write("**Sample BR/CR TrVocDetail rows (newest 20):**", diag_coll_raw)
+        st.write("**Sample BR/CR TrVocDetail rows (newest 20, no date filter):**", diag_coll_raw)
 
-        st.write(f"**df_coll rows:** {len(df_coll)}")
+        st.write(f"**df_coll rows (with current FY filter):** {len(df_coll)}")
         if not df_coll.empty:
             st.dataframe(df_coll)
 
@@ -184,7 +208,8 @@ def render():
                    i.TotalAmount AS sales, i.TotalBottleQty AS bottles
             FROM TrVocHead h
             JOIN TrVocItem i ON i.TransTypeID=h.TransTypeID AND i.VoucherNo=h.VoucherNo
-            WHERE h.TransTypeID IN ({SALES_IN}) {NOT_CANCELLED} {NOT_FREE}
+            JOIN MsTransType t ON t.id_key=h.TransTypeID
+            WHERE t.ShortName='MS' {NOT_CANCELLED} {NOT_FREE}
               {date_filter}
         ) t
         GROUP BY principal
@@ -225,7 +250,8 @@ def render():
                    i.TotalAmount AS sales
             FROM TrVocHead h
             JOIN TrVocItem i ON i.TransTypeID=h.TransTypeID AND i.VoucherNo=h.VoucherNo
-            WHERE h.TransTypeID IN ({SALES_IN}) {NOT_CANCELLED} {NOT_FREE}
+            JOIN MsTransType t ON t.id_key=h.TransTypeID
+            WHERE t.ShortName='MS' {NOT_CANCELLED} {NOT_FREE}
               {date_filter}
         ) t
         GROUP BY yr, mo, principal
@@ -326,7 +352,8 @@ def render():
         JOIN TrVocItem i ON i.TransTypeID=h.TransTypeID AND i.VoucherNo=h.VoucherNo
         JOIN TrVocDetail d ON d.TransTypeID=h.TransTypeID AND d.VoucherNo=h.VoucherNo
         JOIN MsPartyMaster p ON p.PartyID=d.PartyID
-        WHERE h.TransTypeID IN ({SALES_IN}) {NOT_CANCELLED} {NOT_FREE}
+        JOIN MsTransType t ON t.id_key=h.TransTypeID
+        WHERE t.ShortName='MS' {NOT_CANCELLED} {NOT_FREE}
           AND d.DrCrIndicator='D'
           {date_filter}
         GROUP BY p.PartyName ORDER BY sales DESC
