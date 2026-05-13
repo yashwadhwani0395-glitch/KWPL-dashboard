@@ -15,6 +15,7 @@ PAYMENT_IN    = ",".join(PAYMENT_CODES)
 
 def render():
     st.header("Balance Sheet & Financial Summary")
+    date_filter = st.session_state.get("date_filter", "")
 
     st.info(
         "This tab provides a management-level financial summary derived from "
@@ -29,12 +30,14 @@ def render():
         JOIN TrVocItem i ON i.TransTypeID=h.TransTypeID AND i.VoucherNo=h.VoucherNo
         JOIN MsTransType t ON t.id_key=h.TransTypeID
         WHERE t.ShortName='MS' {NOT_CANCELLED} {NOT_FREE}
+          {date_filter}
     """)
     cogs = query(f"""
         SELECT SUM(i.TotalAmount) AS value
         FROM TrVocHead h
         JOIN TrVocItem i ON i.TransTypeID=h.TransTypeID AND i.VoucherNo=h.VoucherNo
         WHERE h.TransTypeID IN ({PURCHASE_IN}) {NOT_CANCELLED} {NOT_FREE}
+          {date_filter}
     """)
     receivables = query(f"""
         SELECT SUM(d.RemainingAmt) AS value
@@ -108,12 +111,14 @@ def render():
     df_trend = query(f"""
         SELECT
             YEAR(h.VoucherDate) AS yr, MONTH(h.VoucherDate) AS mo,
-            SUM(CASE WHEN h.TransTypeID IN ({SALES_IN})    THEN i.TotalAmount ELSE 0 END) AS revenue,
-            SUM(CASE WHEN h.TransTypeID IN ({PURCHASE_IN}) THEN i.TotalAmount ELSE 0 END) AS cogs
+            SUM(CASE WHEN t.ShortName='MS'                      THEN i.TotalAmount ELSE 0 END) AS revenue,
+            SUM(CASE WHEN h.TransTypeID IN ({PURCHASE_IN})      THEN i.TotalAmount ELSE 0 END) AS cogs
         FROM TrVocHead h
         JOIN TrVocItem i ON i.TransTypeID=h.TransTypeID AND i.VoucherNo=h.VoucherNo
-        WHERE h.TransTypeID IN ({SALES_IN},{PURCHASE_IN})
+        JOIN MsTransType t ON t.id_key=h.TransTypeID
+        WHERE (t.ShortName='MS' OR h.TransTypeID IN ({PURCHASE_IN}))
           {NOT_CANCELLED} AND ISNULL(i.FreeItemYN,'N') <> 'Y'
+          {date_filter}
         GROUP BY YEAR(h.VoucherDate), MONTH(h.VoucherDate)
         ORDER BY yr, mo
     """)

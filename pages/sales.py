@@ -1,13 +1,14 @@
 import streamlit as st
 from db import query
 from config import NOT_CANCELLED, NOT_FREE, COLORS
-from utils import fmt_inr, fmt_qty, month_col, fmt_date
+from utils import fmt_inr, fmt_qty, month_col
 from components.kpi_cards import kpi_row
-from components.charts import bar_chart, pie_chart, line_chart
+from components.charts import bar_chart, pie_chart
 
 
 def render():
     st.header("Sales")
+    date_filter = st.session_state.get("date_filter", "")
 
     # ── KPIs ─────────────────────────────────────────────────────────────────
     sales_amt = query(f"""
@@ -18,12 +19,14 @@ def render():
         JOIN TrVocItem i ON i.TransTypeID=h.TransTypeID AND i.VoucherNo=h.VoucherNo
         JOIN MsTransType t ON t.id_key=h.TransTypeID
         WHERE t.ShortName='MS' {NOT_CANCELLED} {NOT_FREE}
+          {date_filter}
     """)
     inv_count = query(f"""
         SELECT COUNT(*) AS invoices
         FROM TrVocHead h
         JOIN MsTransType t ON t.id_key=h.TransTypeID
         WHERE t.ShortName='MS' {NOT_CANCELLED}
+          {date_filter}
     """)
     kpi_row([
         {"label": "Invoices",     "value": inv_count["invoices"][0], "fmt": "qty"},
@@ -46,6 +49,7 @@ def render():
             JOIN TrVocItem i ON i.TransTypeID=h.TransTypeID AND i.VoucherNo=h.VoucherNo
             JOIN MsTransType t ON t.id_key=h.TransTypeID
             WHERE t.ShortName='MS' {NOT_CANCELLED} {NOT_FREE}
+              {date_filter}
             GROUP BY YEAR(h.VoucherDate), MONTH(h.VoucherDate) ORDER BY yr, mo
         """)
         if not df_m.empty:
@@ -62,6 +66,7 @@ def render():
             JOIN TrVocItem i ON i.TransTypeID=h.TransTypeID AND i.VoucherNo=h.VoucherNo
             JOIN MsTransType t ON t.id_key=h.TransTypeID
             WHERE t.ShortName='MS' {NOT_CANCELLED} {NOT_FREE}
+              {date_filter}
             GROUP BY t.TransTypeName ORDER BY sales DESC
         """)
         if not df_cat.empty:
@@ -88,7 +93,6 @@ def render():
     st.divider()
 
     # ── Top customers + Salesman ──────────────────────────────────────────────
-    # Aggregate invoices first, then join party to avoid TrVocItem×TrVocDetail inflation.
     col_l, col_r = st.columns(2)
 
     with col_l:
@@ -103,6 +107,7 @@ def render():
                 JOIN TrVocItem i ON i.TransTypeID=h.TransTypeID AND i.VoucherNo=h.VoucherNo
                 JOIN MsTransType t ON t.id_key=h.TransTypeID
                 WHERE t.ShortName='MS' {NOT_CANCELLED} {NOT_FREE}
+                  {date_filter}
                 GROUP BY h.TransTypeID, h.VoucherNo
             ) v
             JOIN TrVocDetail d ON d.TransTypeID=v.TransTypeID AND d.VoucherNo=v.VoucherNo
@@ -129,6 +134,7 @@ def render():
                 JOIN TrVocItem i ON i.TransTypeID=h.TransTypeID AND i.VoucherNo=h.VoucherNo
                 JOIN MsTransType t ON t.id_key=h.TransTypeID
                 WHERE t.ShortName='MS' {NOT_CANCELLED} {NOT_FREE}
+                  {date_filter}
                 GROUP BY h.TransTypeID, h.VoucherNo, h.SalesManID
             ) v
             JOIN MsSalesmanMaster s ON s.SalesManID=v.SalesManID
@@ -154,6 +160,7 @@ def render():
         JOIN MsTransType t ON t.id_key=h.TransTypeID
         JOIN MsBrandMaster b ON b.BrandID=i.BrandID
         WHERE t.ShortName='MS' {NOT_CANCELLED} {NOT_FREE}
+          {date_filter}
         GROUP BY b.BrandName ORDER BY sales DESC
     """)
     col_l, col_r = st.columns(2)

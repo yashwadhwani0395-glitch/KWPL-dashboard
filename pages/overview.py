@@ -10,22 +10,7 @@ from components.charts import grouped_bar, bar_chart, pie_chart
 
 def render():
     st.header("Business Overview")
-
-    # ── Financial Year selector ───────────────────────────────────────────────
-    FY_OPTIONS = {
-        "FY 2025-26 (Apr 2025 – Mar 2026)": ("2025-04-01", "2026-03-31"),
-        "FY 2026-27 (Apr 2026 – Present)":  ("2026-04-01", None),
-        "All Years":                         (None,        None),
-    }
-    fy_sel = st.radio("Financial Year", list(FY_OPTIONS.keys()), horizontal=True)
-    date_from, date_to = FY_OPTIONS[fy_sel]
-
-    date_filter = ""
-    if date_from:
-        date_filter += f" AND h.VoucherDate >= '{date_from}'"
-    if date_to:
-        date_filter += f" AND h.VoucherDate <= '{date_to}'"
-
+    date_filter = st.session_state.get("date_filter", "")
     st.divider()
 
     # ── KPIs ─────────────────────────────────────────────────────────────────

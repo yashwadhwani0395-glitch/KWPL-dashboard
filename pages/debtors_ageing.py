@@ -9,6 +9,7 @@ from components.charts import bar_chart, pie_chart
 
 def render():
     st.header("Debtors & Outstanding")
+    date_filter = st.session_state.get("date_filter", "")
 
     # ── KPIs ─────────────────────────────────────────────────────────────────
     kpi = query(f"""
@@ -23,6 +24,7 @@ def render():
         WHERE t.ShortName='MS' {NOT_CANCELLED}
           AND d.DrCrIndicator='D' AND d.RemainingAmt > 0
           AND d.PartyID IS NOT NULL
+          {date_filter}
     """)
     kpi_row([
         {"label": "Active Debtors",    "value": kpi["debtors"][0],          "fmt": "qty"},
@@ -51,6 +53,7 @@ def render():
         WHERE t.ShortName='MS' {NOT_CANCELLED}
           AND d.DrCrIndicator='D' AND d.RemainingAmt > 0
           AND d.PartyID IS NOT NULL
+          {date_filter}
         GROUP BY p.PartyName ORDER BY total DESC
     """)
 
@@ -126,6 +129,7 @@ def render():
         WHERE t.ShortName='MS' {NOT_CANCELLED}
           AND d.DrCrIndicator='D' AND d.RemainingAmt > 0
           AND d.PartyID IS NOT NULL AND s.ResignDate IS NULL
+          {date_filter}
         GROUP BY s.FullName ORDER BY outstanding DESC
     """)
     if not df_sm.empty:
