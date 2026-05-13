@@ -117,7 +117,6 @@ def render():
         JOIN MsTransType t ON t.id_key=h.TransTypeID
         WHERE t.ShortName IN ('BR','CR') {NOT_CANCELLED}
           AND d.DrCrIndicator='C'
-          AND d.AccHeadID='000002'
           {date_filter}
         GROUP BY YEAR(h.VoucherDate), MONTH(h.VoucherDate)
         ORDER BY yr, mo
