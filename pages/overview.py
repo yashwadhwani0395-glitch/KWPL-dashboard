@@ -24,20 +24,26 @@ def render():
         WHERE (t.ShortName='MS' OR h.TransTypeID IN ({PURCHASE_IN}))
           {NOT_CANCELLED} {date_filter}
     """)
+    # Count only vouchers that have actual product lines (exclude pure accounting entries)
     kpi_cnt = query(f"""
-        SELECT COUNT(*) AS total_invoices
+        SELECT COUNT(DISTINCT CAST(h.TransTypeID AS VARCHAR)+'|'+h.VoucherNo) AS total_invoices
         FROM TrVocHead h
+        JOIN TrVocItem i ON i.TransTypeID=h.TransTypeID AND i.VoucherNo=h.VoucherNo
         JOIN MsTransType t ON t.id_key=h.TransTypeID
         WHERE t.ShortName='MS' {NOT_CANCELLED} {date_filter}
     """)
+    # Active customers = distinct D% parties on invoices that have items
     kpi_ar = query(f"""
-        SELECT
-            COUNT(DISTINCT CASE WHEN d.PartyID IS NOT NULL THEN d.PartyID END) AS active_customers
-        FROM TrVocDetail d
-        JOIN TrVocHead h ON h.TransTypeID=d.TransTypeID AND h.VoucherNo=d.VoucherNo
-        JOIN MsTransType t ON t.id_key=h.TransTypeID
-        WHERE t.ShortName='MS' {NOT_CANCELLED}
-          AND d.DrCrIndicator='D' {date_filter}
+        SELECT COUNT(DISTINCT d.PartyID) AS active_customers
+        FROM (
+            SELECT h.TransTypeID, h.VoucherNo
+            FROM TrVocHead h
+            JOIN TrVocItem i ON i.TransTypeID=h.TransTypeID AND i.VoucherNo=h.VoucherNo
+            JOIN MsTransType t ON t.id_key=h.TransTypeID
+            WHERE t.ShortName='MS' {NOT_CANCELLED} {date_filter}
+        ) v
+        JOIN TrVocDetail d ON d.TransTypeID=v.TransTypeID AND d.VoucherNo=v.VoucherNo
+        WHERE d.DrCrIndicator='D' AND LEFT(d.PartyID, 1) = 'D'
     """)
     # Outstanding from MsPartyOpening — pre-computed, matches ERP exactly
     # CloseBal = closing balance 31.03.2026; CloseBalTmp = running current balance

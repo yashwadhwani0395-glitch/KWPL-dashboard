@@ -127,13 +127,13 @@ _B_WINE = [
     230, 231, 232, 233, 234, 235, 236, 237, 240, 241, 242, 243,
 ]
 
-PRINCIPAL_ORDER  = ["Diageo", "USL / McDowell's", "UB / Kingfisher",
+PRINCIPAL_ORDER  = ["Diageo", "United Spirits", "United Breweries",
                     "Brown-Forman", "Wines & Imports", "Others"]
 
 PRINCIPAL_COLORS = {
     "Diageo":           "#7B2D8B",
-    "USL / McDowell's": "#E84855",
-    "UB / Kingfisher":  "#F7B731",
+    "United Spirits":   "#E84855",
+    "United Breweries": "#F7B731",
     "Brown-Forman":     "#8B4513",
     "Wines & Imports":  "#28A745",
     "Others":           "#6C757D",
@@ -146,8 +146,8 @@ def brand_case(alias: str = "i") -> str:
         return ",".join(str(x) for x in lst)
     return f"""CASE
         WHEN {alias}.BrandID IN ({ids(_B_DIAGEO)}) THEN 'Diageo'
-        WHEN {alias}.BrandID IN ({ids(_B_USL)})    THEN 'USL / McDowell''s'
-        WHEN {alias}.BrandID IN ({ids(_B_UB)})     THEN 'UB / Kingfisher'
+        WHEN {alias}.BrandID IN ({ids(_B_USL)})    THEN 'United Spirits'
+        WHEN {alias}.BrandID IN ({ids(_B_UB)})     THEN 'United Breweries'
         WHEN {alias}.BrandID IN ({ids(_B_BF)})     THEN 'Brown-Forman'
         WHEN {alias}.BrandID IN ({ids(_B_WINE)})   THEN 'Wines & Imports'
         ELSE 'Others'
