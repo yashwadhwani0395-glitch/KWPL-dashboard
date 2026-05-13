@@ -41,6 +41,8 @@ _B_DIAGEO = [
     463, 464,
     # Roe & Co
     482,
+    # Greater Than & Hapusa (Nao Spirits — Diageo stake)
+    589, 590, 593,
 ]
 
 _B_USL = [
