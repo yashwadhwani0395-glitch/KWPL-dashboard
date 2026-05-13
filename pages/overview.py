@@ -32,13 +32,22 @@ def render():
     """)
     kpi_ar = query(f"""
         SELECT
-            COUNT(DISTINCT CASE WHEN d.PartyID IS NOT NULL THEN d.PartyID END) AS active_customers,
-            SUM(CASE WHEN d.RemainingAmt > 0 AND d.PartyID IS NOT NULL THEN d.RemainingAmt ELSE 0 END) AS total_outstanding
+            COUNT(DISTINCT CASE WHEN d.PartyID IS NOT NULL THEN d.PartyID END) AS active_customers
         FROM TrVocDetail d
         JOIN TrVocHead h ON h.TransTypeID=d.TransTypeID AND h.VoucherNo=d.VoucherNo
         JOIN MsTransType t ON t.id_key=h.TransTypeID
         WHERE t.ShortName='MS' {NOT_CANCELLED}
           AND d.DrCrIndicator='D' {date_filter}
+    """)
+    # Outstanding = current balance, never date-filtered
+    kpi_os = query(f"""
+        SELECT
+            SUM(CASE WHEN d.RemainingAmt > 0 AND d.PartyID IS NOT NULL THEN d.RemainingAmt ELSE 0 END) AS total_outstanding
+        FROM TrVocDetail d
+        JOIN TrVocHead h ON h.TransTypeID=d.TransTypeID AND h.VoucherNo=d.VoucherNo
+        JOIN MsTransType t ON t.id_key=h.TransTypeID
+        WHERE t.ShortName='MS' {NOT_CANCELLED}
+          AND d.DrCrIndicator='D'
     """)
     stock_val = query(f"""
         SELECT SUM(sub.net_bottles * m.MrpBottRate) AS stock_value
@@ -61,8 +70,8 @@ def render():
         {"label": "Total Sales",       "value": kpi_vol["total_sales"][0],       "fmt": "inr"},
         {"label": "Total Purchases",   "value": kpi_vol["total_purchases"][0],   "fmt": "inr"},
         {"label": "Total Invoices",    "value": kpi_cnt["total_invoices"][0],    "fmt": "qty"},
-        {"label": "Active Customers",  "value": kpi_ar["active_customers"][0],   "fmt": "qty"},
-        {"label": "Outstanding",       "value": kpi_ar["total_outstanding"][0],  "fmt": "inr"},
+        {"label": "Active Customers",  "value": kpi_ar["active_customers"][0],    "fmt": "qty"},
+        {"label": "Outstanding",       "value": kpi_os["total_outstanding"][0],  "fmt": "inr"},
         {"label": "Stock Value (MRP)", "value": stock_val["stock_value"][0],        "fmt": "inr"},
     ])
 

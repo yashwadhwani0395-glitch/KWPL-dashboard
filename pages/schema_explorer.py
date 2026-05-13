@@ -157,6 +157,51 @@ def render():
         st.caption("Runs 8 targeted queries. Download all results as Excel for sharing.")
 
         DIAG_SECTIONS = [
+            ("I — MS TransType breakdown (sales by type name)", """
+                SELECT t.TransTypeName, t.ShortName, t.id_key AS TransTypeID,
+                       COUNT(DISTINCT h.VoucherNo) AS vouchers,
+                       SUM(i.TotalAmount)           AS total_amount,
+                       MIN(h.VoucherDate)           AS earliest,
+                       MAX(h.VoucherDate)           AS latest
+                FROM TrVocHead h
+                JOIN TrVocItem i ON i.TransTypeID=h.TransTypeID AND i.VoucherNo=h.VoucherNo
+                JOIN MsTransType t ON t.id_key=h.TransTypeID
+                WHERE t.ShortName='MS'
+                  AND ISNULL(h.Cancelled,'N') <> 'Y'
+                  AND ISNULL(i.FreeItemYN,'N') <> 'Y'
+                GROUP BY t.TransTypeName, t.ShortName, t.id_key
+                ORDER BY total_amount DESC
+            """),
+            ("J — MS top 20 parties on DEBIT side (who are the customers?)", """
+                SELECT TOP 20 p.PartyName, p.PartyID,
+                       COUNT(DISTINCT h.VoucherNo) AS invoices,
+                       SUM(d.Amount)               AS total_amount
+                FROM TrVocDetail d
+                JOIN TrVocHead h  ON h.TransTypeID=d.TransTypeID AND h.VoucherNo=d.VoucherNo
+                JOIN MsTransType t ON t.id_key=h.TransTypeID
+                JOIN MsPartyMaster p ON p.PartyID=d.PartyID
+                WHERE t.ShortName='MS'
+                  AND ISNULL(h.Cancelled,'N') <> 'Y'
+                  AND d.DrCrIndicator='D'
+                  AND d.PartyID IS NOT NULL
+                GROUP BY p.PartyName, p.PartyID
+                ORDER BY total_amount DESC
+            """),
+            ("K — MS FY25-26 total by TransTypeID (to find retail-only type)", """
+                SELECT t.id_key AS TransTypeID, t.TransTypeName,
+                       COUNT(DISTINCT h.VoucherNo) AS vouchers,
+                       SUM(i.TotalAmount)           AS total_amount
+                FROM TrVocHead h
+                JOIN TrVocItem i ON i.TransTypeID=h.TransTypeID AND i.VoucherNo=h.VoucherNo
+                JOIN MsTransType t ON t.id_key=h.TransTypeID
+                WHERE t.ShortName='MS'
+                  AND ISNULL(h.Cancelled,'N') <> 'Y'
+                  AND ISNULL(i.FreeItemYN,'N') <> 'Y'
+                  AND h.VoucherDate >= '2025-04-01'
+                  AND h.VoucherDate <= '2026-03-31'
+                GROUP BY t.id_key, t.TransTypeName
+                ORDER BY total_amount DESC
+            """),
             ("A — TrVocDetail columns", """
                 SELECT COLUMN_NAME, DATA_TYPE
                 FROM INFORMATION_SCHEMA.COLUMNS

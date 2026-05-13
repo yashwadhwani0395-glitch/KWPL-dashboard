@@ -24,7 +24,6 @@ def render():
         WHERE t.ShortName='MS' {NOT_CANCELLED}
           AND d.DrCrIndicator='D' AND d.RemainingAmt > 0
           AND d.PartyID IS NOT NULL
-          {date_filter}
     """)
     kpi_row([
         {"label": "Active Debtors",    "value": kpi["debtors"][0],          "fmt": "qty"},
