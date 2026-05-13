@@ -33,15 +33,15 @@ _B_DIAGEO = [
     280, 481, 542, 567,
     # Ketel One
     285, 380, 430,
-    # Don Julio (Diageo)
+    # Don Julio
     475, 476, 541, 560,
     # Captain Morgan, Ciroc, Gordon's, J&B Rare
     224, 281, 291, 381,
-    # Godawan (Diageo India Single Malt)
+    # Godawan
     463, 464,
     # Roe & Co
     482,
-    # Greater Than & Hapusa (Nao Spirits — Diageo stake)
+    # Greater Than & Hapusa (mapped to Diageo in ERP)
     589, 590, 593,
 ]
 
@@ -75,9 +75,9 @@ _B_UB = [
     571, 572,
     # London Pilsner (UB brand)
     38,
-    # Heineken (Heineken-UB JV in India)
+    # Heineken
     219, 448, 552, 566,
-    # Amstel (Heineken brand)
+    # Amstel
     443, 558,
     # Cannon, Queenfisher
     77, 554,
@@ -88,7 +88,7 @@ _B_BF = [
     576, 577, 578, 579, 583, 585,
     # Woodford Reserve
     580,
-    # GlenDronach (Brown-Forman acquired 2016)
+    # GlenDronach
     588, 592,
 ]
 
