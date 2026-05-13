@@ -10,29 +10,24 @@ def render():
     st.header("Sales")
     date_filter = st.session_state.get("date_filter", "")
 
-    # ── KPIs ─────────────────────────────────────────────────────────────────
-    sales_amt = query(f"""
-        SELECT SUM(i.TotalAmount) AS sales,
-               SUM(i.TotalBottleQty) AS bottles,
-               SUM(i.CaseQty) AS cases
+    # ── KPIs — single query ───────────────────────────────────────────────────
+    kpi = query(f"""
+        SELECT
+            COUNT(DISTINCT CAST(h.TransTypeID AS VARCHAR) + '|' + h.VoucherNo) AS invoices,
+            SUM(i.TotalAmount)    AS sales,
+            SUM(i.TotalBottleQty) AS bottles,
+            SUM(i.CaseQty)        AS cases
         FROM TrVocHead h
         JOIN TrVocItem i ON i.TransTypeID=h.TransTypeID AND i.VoucherNo=h.VoucherNo
         JOIN MsTransType t ON t.id_key=h.TransTypeID
         WHERE t.ShortName='MS' {NOT_CANCELLED} {NOT_FREE}
           {date_filter}
     """)
-    inv_count = query(f"""
-        SELECT COUNT(*) AS invoices
-        FROM TrVocHead h
-        JOIN MsTransType t ON t.id_key=h.TransTypeID
-        WHERE t.ShortName='MS' {NOT_CANCELLED}
-          {date_filter}
-    """)
     kpi_row([
-        {"label": "Invoices",     "value": inv_count["invoices"][0], "fmt": "qty"},
-        {"label": "Total Sales",  "value": sales_amt["sales"][0],    "fmt": "inr"},
-        {"label": "Bottles Sold", "value": sales_amt["bottles"][0],  "fmt": "qty"},
-        {"label": "Cases Sold",   "value": sales_amt["cases"][0],    "fmt": "qty"},
+        {"label": "Invoices",     "value": kpi["invoices"][0], "fmt": "qty"},
+        {"label": "Total Sales",  "value": kpi["sales"][0],    "fmt": "inr"},
+        {"label": "Bottles Sold", "value": kpi["bottles"][0],  "fmt": "qty"},
+        {"label": "Cases Sold",   "value": kpi["cases"][0],    "fmt": "qty"},
     ])
 
     st.divider()

@@ -23,37 +23,26 @@ def render():
         icon="ℹ️"
     )
 
-    # ── Top-line summary ─────────────────────────────────────────────────────
-    revenue = query(f"""
-        SELECT SUM(i.TotalAmount) AS value
+    # ── Top-line summary — 2 queries instead of 4 ────────────────────────────
+    pl = query(f"""
+        SELECT
+            SUM(CASE WHEN t.ShortName='MS'                 AND ISNULL(i.FreeItemYN,'N')<>'Y' THEN i.TotalAmount ELSE 0 END) AS revenue,
+            SUM(CASE WHEN h.TransTypeID IN ({PURCHASE_IN}) AND ISNULL(i.FreeItemYN,'N')<>'Y' THEN i.TotalAmount ELSE 0 END) AS cogs
         FROM TrVocHead h
         JOIN TrVocItem i ON i.TransTypeID=h.TransTypeID AND i.VoucherNo=h.VoucherNo
         JOIN MsTransType t ON t.id_key=h.TransTypeID
-        WHERE t.ShortName='MS' {NOT_CANCELLED} {NOT_FREE}
-          {date_filter}
+        WHERE (t.ShortName='MS' OR h.TransTypeID IN ({PURCHASE_IN}))
+          {NOT_CANCELLED} {date_filter}
     """)
-    cogs = query(f"""
-        SELECT SUM(i.TotalAmount) AS value
-        FROM TrVocHead h
-        JOIN TrVocItem i ON i.TransTypeID=h.TransTypeID AND i.VoucherNo=h.VoucherNo
-        WHERE h.TransTypeID IN ({PURCHASE_IN}) {NOT_CANCELLED} {NOT_FREE}
-          {date_filter}
-    """)
-    receivables = query(f"""
-        SELECT SUM(d.RemainingAmt) AS value
+    ar_ap = query(f"""
+        SELECT
+            SUM(CASE WHEN t.ShortName='MS' AND d.DrCrIndicator='D' AND d.PartyID IS NOT NULL AND d.RemainingAmt > 0 THEN d.RemainingAmt ELSE 0 END) AS receivables,
+            SUM(CASE WHEN h.TransTypeID IN ({PURCHASE_IN}) AND d.DrCrIndicator='C' AND d.RemainingAmt > 0 THEN d.RemainingAmt ELSE 0 END) AS payables
         FROM TrVocDetail d
         JOIN TrVocHead h ON h.TransTypeID=d.TransTypeID AND h.VoucherNo=d.VoucherNo
         JOIN MsTransType t ON t.id_key=h.TransTypeID
-        WHERE t.ShortName='MS' {NOT_CANCELLED}
-          AND d.DrCrIndicator='D' AND d.RemainingAmt > 0
-          AND d.PartyID IS NOT NULL
-    """)
-    payables = query(f"""
-        SELECT SUM(d.RemainingAmt) AS value
-        FROM TrVocDetail d
-        JOIN TrVocHead h ON h.TransTypeID=d.TransTypeID AND h.VoucherNo=d.VoucherNo
-        WHERE h.TransTypeID IN ({PURCHASE_IN}) {NOT_CANCELLED}
-          AND d.DrCrIndicator='C' AND d.RemainingAmt > 0
+        WHERE {NOT_CANCELLED[4:]}
+          AND d.RemainingAmt > 0
     """)
     stock_val = query(f"""
         SELECT SUM(sub.net_bottles * m.MrpBottRate) AS mrp
@@ -72,19 +61,21 @@ def render():
         WHERE sub.net_bottles > 0
     """)
 
-    rev_val  = float(revenue["value"][0]  or 0)
-    cogs_val = float(cogs["value"][0]     or 0)
+    rev_val  = float(pl["revenue"][0]       or 0)
+    cogs_val = float(pl["cogs"][0]          or 0)
+    recv_val = float(ar_ap["receivables"][0] or 0)
+    pay_val  = float(ar_ap["payables"][0]   or 0)
     gross_profit = rev_val - cogs_val
     gp_pct = (gross_profit / rev_val * 100) if rev_val else 0
 
     kpi_row([
-        {"label": "Revenue (Sales)",    "value": rev_val,                         "fmt": "inr"},
-        {"label": "Cost of Goods",      "value": cogs_val,                        "fmt": "inr"},
-        {"label": "Gross Profit",       "value": gross_profit,                    "fmt": "inr",
+        {"label": "Revenue (Sales)",   "value": rev_val,               "fmt": "inr"},
+        {"label": "Cost of Goods",     "value": cogs_val,              "fmt": "inr"},
+        {"label": "Gross Profit",      "value": gross_profit,          "fmt": "inr",
          "delta": f"{gp_pct:.1f}% GP%"},
-        {"label": "Receivables",        "value": receivables["value"][0],         "fmt": "inr"},
-        {"label": "Payables",           "value": payables["value"][0],            "fmt": "inr"},
-        {"label": "Stock (MRP Value)",   "value": stock_val["mrp"][0],             "fmt": "inr"},
+        {"label": "Receivables",       "value": recv_val,              "fmt": "inr"},
+        {"label": "Payables",          "value": pay_val,               "fmt": "inr"},
+        {"label": "Stock (MRP Value)", "value": stock_val["mrp"][0],   "fmt": "inr"},
     ])
 
     st.divider()
@@ -92,13 +83,12 @@ def render():
     # ── P&L summary table ─────────────────────────────────────────────────────
     st.subheader("P&L Summary")
     pl_rows = [
-        ("Revenue",        rev_val,                 ""),
-        ("Cost of Goods",  cogs_val,                ""),
-        ("Gross Profit",   gross_profit,            f"{gp_pct:.1f}%"),
-        ("Receivables",    float(receivables["value"][0] or 0), ""),
-        ("Payables",       float(payables["value"][0]   or 0), ""),
-        ("Net Position",
-         float(receivables["value"][0] or 0) - float(payables["value"][0] or 0), ""),
+        ("Revenue",        rev_val,          ""),
+        ("Cost of Goods",  cogs_val,         ""),
+        ("Gross Profit",   gross_profit,     f"{gp_pct:.1f}%"),
+        ("Receivables",    recv_val,         ""),
+        ("Payables",       pay_val,          ""),
+        ("Net Position",   recv_val - pay_val, ""),
     ]
     df_pl = pd.DataFrame(pl_rows, columns=["Item", "Amount", "Note"])
     df_pl["Amount"] = df_pl["Amount"].apply(fmt_inr)
@@ -137,13 +127,9 @@ def render():
     # ── Working capital ───────────────────────────────────────────────────────
     st.subheader("Working Capital Components")
     wc_data = {
-        "Component":    ["Receivables", "Stock (MRP)", "Payables"],
-        "Amount":       [
-            float(receivables["value"][0] or 0),
-            float(stock_val["mrp"][0]     or 0),
-            float(payables["value"][0]    or 0),
-        ],
-        "Type":         ["Asset", "Asset", "Liability"],
+        "Component": ["Receivables", "Stock (MRP)", "Payables"],
+        "Amount":    [recv_val, float(stock_val["mrp"][0] or 0), pay_val],
+        "Type":      ["Asset", "Asset", "Liability"],
     }
     df_wc = pd.DataFrame(wc_data)
 

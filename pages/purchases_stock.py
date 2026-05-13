@@ -10,20 +10,16 @@ def render():
     st.header("Purchases & Stock")
     date_filter = st.session_state.get("date_filter", "")
 
-    # ── KPIs ─────────────────────────────────────────────────────────────────
-    pur_amt = query(f"""
-        SELECT SUM(i.TotalAmount) AS purchases,
-               SUM(i.TotalBottleQty) AS bottles,
-               SUM(i.CaseQty) AS cases
+    # ── KPIs — 2 queries instead of 3 ───────────────────────────────────────
+    pur = query(f"""
+        SELECT
+            COUNT(DISTINCT CAST(h.TransTypeID AS VARCHAR) + '|' + h.VoucherNo) AS invoices,
+            SUM(i.TotalAmount)    AS purchases,
+            SUM(i.TotalBottleQty) AS bottles,
+            SUM(i.CaseQty)        AS cases
         FROM TrVocHead h
         JOIN TrVocItem i ON i.TransTypeID=h.TransTypeID AND i.VoucherNo=h.VoucherNo
         WHERE h.TransTypeID IN ({PURCHASE_IN}) {NOT_CANCELLED} {NOT_FREE}
-          {date_filter}
-    """)
-    pur_inv = query(f"""
-        SELECT COUNT(*) AS invoices
-        FROM TrVocHead h
-        WHERE h.TransTypeID IN ({PURCHASE_IN}) {NOT_CANCELLED}
           {date_filter}
     """)
     # Stock is always current (no date filter)
@@ -46,11 +42,11 @@ def render():
         WHERE sub.net_bottles > 0
     """)
     kpi_row([
-        {"label": "Purchase Invoices", "value": pur_inv["invoices"][0],    "fmt": "qty"},
-        {"label": "Total Purchases",   "value": pur_amt["purchases"][0],   "fmt": "inr"},
-        {"label": "Bottles Purchased", "value": pur_amt["bottles"][0],     "fmt": "qty"},
-        {"label": "Stock (MRP Value)", "value": stock["stock_mrp"][0],     "fmt": "inr"},
-        {"label": "Stock (Bottles)",   "value": stock["total_bottles"][0], "fmt": "qty"},
+        {"label": "Purchase Invoices", "value": pur["invoices"][0],         "fmt": "qty"},
+        {"label": "Total Purchases",   "value": pur["purchases"][0],        "fmt": "inr"},
+        {"label": "Bottles Purchased", "value": pur["bottles"][0],          "fmt": "qty"},
+        {"label": "Stock (MRP Value)", "value": stock["stock_mrp"][0],      "fmt": "inr"},
+        {"label": "Stock (Bottles)",   "value": stock["total_bottles"][0],  "fmt": "qty"},
     ])
 
     st.divider()

@@ -17,24 +17,15 @@ def render():
     st.header("Cash Flow & Expenses")
     date_filter = st.session_state.get("date_filter", "")
 
-    # ── KPIs ─────────────────────────────────────────────────────────────────
+    # ── KPIs — single query ───────────────────────────────────────────────────
     kpi = query(f"""
         SELECT
-            SUM(CASE WHEN t.ShortName IN ({RECEIPT_IN}) AND d.DrCrIndicator='{COLL_IND}'
-                THEN d.Amount ELSE 0 END) AS total_collections,
-            SUM(CASE WHEN t.ShortName IN ({PAYMENT_IN}) AND d.DrCrIndicator='{PAY_IND}'
-                THEN d.Amount ELSE 0 END) AS total_payments
+            SUM(CASE WHEN t.ShortName IN ({RECEIPT_IN}) AND d.DrCrIndicator='{COLL_IND}' THEN d.Amount ELSE 0 END) AS total_collections,
+            SUM(CASE WHEN t.ShortName IN ({PAYMENT_IN}) AND d.DrCrIndicator='{PAY_IND}'  THEN d.Amount ELSE 0 END) AS total_payments,
+            COUNT(DISTINCT CASE WHEN t.ShortName IN ({RECEIPT_IN}) THEN CAST(h.TransTypeID AS VARCHAR)+'|'+h.VoucherNo END) AS receipt_count,
+            COUNT(DISTINCT CASE WHEN t.ShortName IN ({PAYMENT_IN}) THEN CAST(h.TransTypeID AS VARCHAR)+'|'+h.VoucherNo END) AS payment_count
         FROM TrVocDetail d
         JOIN TrVocHead h  ON h.TransTypeID=d.TransTypeID AND h.VoucherNo=d.VoucherNo
-        JOIN MsTransType t ON t.id_key=h.TransTypeID
-        WHERE ISNULL(h.Cancelled,'N') <> 'Y'
-          {date_filter}
-    """)
-    rcpt_count = query(f"""
-        SELECT
-            COUNT(CASE WHEN t.ShortName IN ({RECEIPT_IN}) THEN 1 END) AS receipt_count,
-            COUNT(CASE WHEN t.ShortName IN ({PAYMENT_IN}) THEN 1 END) AS payment_count
-        FROM TrVocHead h
         JOIN MsTransType t ON t.id_key=h.TransTypeID
         WHERE ISNULL(h.Cancelled,'N') <> 'Y'
           AND t.ShortName IN ({RECEIPT_IN},{PAYMENT_IN})
@@ -43,8 +34,8 @@ def render():
     kpi_row([
         {"label": "Total Collections", "value": kpi["total_collections"][0], "fmt": "inr"},
         {"label": "Total Payments",    "value": kpi["total_payments"][0],    "fmt": "inr"},
-        {"label": "Receipt Vouchers",  "value": rcpt_count["receipt_count"][0], "fmt": "qty"},
-        {"label": "Payment Vouchers",  "value": rcpt_count["payment_count"][0], "fmt": "qty"},
+        {"label": "Receipt Vouchers",  "value": kpi["receipt_count"][0],     "fmt": "qty"},
+        {"label": "Payment Vouchers",  "value": kpi["payment_count"][0],     "fmt": "qty"},
     ])
 
     st.divider()

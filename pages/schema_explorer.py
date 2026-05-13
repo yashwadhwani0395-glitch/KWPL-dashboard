@@ -265,7 +265,31 @@ def render():
             """),
         ]
 
-        if st.button("Run Diagnostics", type="primary"):
+        import io, zipfile
+
+        col_run, col_dl = st.columns([1, 1])
+
+        with col_run:
+            run_clicked = st.button("▶ Run Diagnostics", type="primary", use_container_width=True)
+
+        with col_dl:
+            if "diag_results" in st.session_state:
+                buf = io.BytesIO()
+                with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+                    for title, df in st.session_state["diag_results"].items():
+                        safe = title.replace(" ", "_").replace("—", "-")[:50]
+                        zf.writestr(f"{safe}.csv", df.to_csv(index=False))
+                st.download_button(
+                    label="⬇️ Download Results (.zip)",
+                    data=buf.getvalue(),
+                    file_name="kwpl_diagnostics.zip",
+                    mime="application/zip",
+                    use_container_width=True,
+                )
+            else:
+                st.button("⬇️ Download Results (.zip)", disabled=True, use_container_width=True)
+
+        if run_clicked:
             with st.spinner("Running 8 queries…"):
                 results = {}
                 for title, sql in DIAG_SECTIONS:
@@ -274,26 +298,10 @@ def render():
                     except Exception as e:
                         results[title] = pd.DataFrame([{"ERROR": str(e)}])
                 st.session_state["diag_results"] = results
+                st.rerun()
 
         if "diag_results" in st.session_state:
-            results = st.session_state["diag_results"]
-
-            # ── Download button (Excel, one sheet per section) ────────────────
-            import io
-            buf = io.BytesIO()
-            with pd.ExcelWriter(buf, engine="openpyxl") as writer:
-                for title, df in results.items():
-                    sheet = title[:31]  # Excel sheet name limit
-                    df.to_excel(writer, sheet_name=sheet, index=False)
-            st.download_button(
-                label="⬇️ Download diagnostics.xlsx",
-                data=buf.getvalue(),
-                file_name="kwpl_diagnostics.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            )
-
             st.divider()
-
-            for title, df in results.items():
+            for title, df in st.session_state["diag_results"].items():
                 st.markdown(f"### {title}")
                 st.dataframe(df, use_container_width=True, hide_index=True)
