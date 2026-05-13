@@ -414,15 +414,10 @@ def render():
             with col_run:
                 run_clicked = st.button("▶ Run Diagnostics", type="primary", use_container_width=True)
             with col_dl:
-                if "diag_results" in st.session_state:
-                    buf = io.BytesIO()
-                    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
-                        for title, df in st.session_state["diag_results"].items():
-                            safe = title.replace(" ", "_").replace("—", "-")[:50]
-                            zf.writestr(f"{safe}.csv", df.to_csv(index=False))
+                if "diag_zip" in st.session_state:
                     st.download_button(
                         label="⬇️ Download Results (.zip)",
-                        data=buf.getvalue(),
+                        data=st.session_state["diag_zip"],
                         file_name="kwpl_diagnostics.zip",
                         mime="application/zip",
                         use_container_width=True,
@@ -439,6 +434,13 @@ def render():
                         except Exception as e:
                             results[title] = pd.DataFrame([{"ERROR": str(e)}])
                     st.session_state["diag_results"] = results
+                    # Pre-build ZIP so download button is always ready
+                    buf = io.BytesIO()
+                    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+                        for title, df in results.items():
+                            safe = title.replace(" ", "_").replace("—", "-")[:50]
+                            zf.writestr(f"{safe}.csv", df.to_csv(index=False))
+                    st.session_state["diag_zip"] = buf.getvalue()
 
             if "diag_results" in st.session_state:
                 st.divider()

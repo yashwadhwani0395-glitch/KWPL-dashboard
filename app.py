@@ -25,6 +25,9 @@ with st.sidebar:
     if date_to:
         date_filter += f" AND h.VoucherDate < '{date_to}'"
     st.session_state["date_filter"] = date_filter
+    # Outstanding uses the FY end date so it matches the ERP closing balance for that period.
+    # For current FY / All Years, date_to is None → outstanding shown as of today.
+    st.session_state["outstanding_cutoff"] = date_to
 
     st.divider()
     st.caption("Data is cached for 5 minutes.")

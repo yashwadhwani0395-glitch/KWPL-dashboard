@@ -16,6 +16,8 @@ PAYMENT_IN    = ",".join(PAYMENT_CODES)
 def render():
     st.header("Balance Sheet & Financial Summary")
     date_filter = st.session_state.get("date_filter", "")
+    cutoff      = st.session_state.get("outstanding_cutoff")
+    cutoff_sql  = f"AND h.VoucherDate < '{cutoff}'" if cutoff else ""
 
     st.info(
         "This tab provides a management-level financial summary derived from "
@@ -41,6 +43,7 @@ def render():
                 FROM TrVocDetail d
                 JOIN TrVocHead h ON h.TransTypeID=d.TransTypeID AND h.VoucherNo=d.VoucherNo
                 WHERE ISNULL(h.Cancelled,'N') <> 'Y' AND d.PartyID LIKE 'D%'
+                  {cutoff_sql}
                 GROUP BY d.PartyID
                 HAVING SUM(CASE WHEN d.DrCrIndicator='D' THEN d.Amount ELSE -d.Amount END) > 0
             ) r) AS receivables,
@@ -49,6 +52,7 @@ def render():
                 FROM TrVocDetail d
                 JOIN TrVocHead h ON h.TransTypeID=d.TransTypeID AND h.VoucherNo=d.VoucherNo
                 WHERE ISNULL(h.Cancelled,'N') <> 'Y' AND d.PartyID LIKE 'C%'
+                  {cutoff_sql}
                 GROUP BY d.PartyID
                 HAVING SUM(CASE WHEN d.DrCrIndicator='C' THEN d.Amount ELSE -d.Amount END) > 0
             ) p) AS payables

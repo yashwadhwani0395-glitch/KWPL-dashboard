@@ -10,9 +10,11 @@ from components.charts import bar_chart, pie_chart
 def render():
     st.header("Debtors & Outstanding")
     date_filter = st.session_state.get("date_filter", "")
+    cutoff      = st.session_state.get("outstanding_cutoff")           # None = today
+    cutoff_sql  = f"AND h.VoucherDate < '{cutoff}'" if cutoff else ""
 
-    # ── KPIs — net ledger balance (DR - CR) for D% parties = true closing balance ──
-    kpi = query("""
+    # ── KPIs — net ledger balance (DR - CR) for D% parties as of FY end date ──
+    kpi = query(f"""
         SELECT
             COUNT(*)         AS debtors,
             SUM(net_balance) AS total_outstanding,
@@ -24,6 +26,7 @@ def render():
             JOIN TrVocHead h ON h.TransTypeID=d.TransTypeID AND h.VoucherNo=d.VoucherNo
             WHERE ISNULL(h.Cancelled,'N') <> 'Y'
               AND d.PartyID LIKE 'D%'
+              {cutoff_sql}
             GROUP BY d.PartyID
             HAVING SUM(CASE WHEN d.DrCrIndicator='D' THEN d.Amount ELSE -d.Amount END) > 0
         ) sub
@@ -119,7 +122,7 @@ def render():
     # ── Salesman-wise outstanding — net ledger balance per salesman ───────────
     st.divider()
     st.subheader("Salesman-wise Outstanding")
-    df_sm = query("""
+    df_sm = query(f"""
         SELECT s.FullName AS salesman,
                COUNT(DISTINCT sub.PartyID) AS debtors,
                SUM(sub.net_balance)        AS outstanding
@@ -130,6 +133,7 @@ def render():
             JOIN TrVocHead h ON h.TransTypeID=d.TransTypeID AND h.VoucherNo=d.VoucherNo
             WHERE ISNULL(h.Cancelled,'N') <> 'Y'
               AND d.PartyID LIKE 'D%'
+              {cutoff_sql}
             GROUP BY h.SalesManID, d.PartyID
             HAVING SUM(CASE WHEN d.DrCrIndicator='D' THEN d.Amount ELSE -d.Amount END) > 0
         ) sub
