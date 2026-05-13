@@ -9,11 +9,11 @@ from components.charts import grouped_bar, bar_chart, pie_chart
 # ── Principal grouping ────────────────────────────────────────────────────────
 _PRIN_CASE = """
     CASE
-        WHEN h.TransTypeID IN (44,13,40)       THEN 'Diageo'
-        WHEN h.TransTypeID IN (18,38)           THEN 'USL / McDowell''s'
-        WHEN h.TransTypeID IN (19,39,41,51,50)  THEN 'UB / Kingfisher'
-        WHEN h.TransTypeID IN (53)              THEN 'Brown-Forman'
-        WHEN h.TransTypeID IN (23,9,34,35)      THEN 'Wines & Imports'
+        WHEN h.TransTypeID IN (1,20,25)         THEN 'Diageo'
+        WHEN h.TransTypeID IN (6,17)             THEN 'USL / McDowell''s'
+        WHEN h.TransTypeID IN (7,24,26,13,16)    THEN 'UB / Kingfisher'
+        WHEN h.TransTypeID IN (51)               THEN 'Brown-Forman'
+        WHEN h.TransTypeID IN (11,47,32,33)      THEN 'Wines & Imports'
         ELSE 'Others'
     END
 """

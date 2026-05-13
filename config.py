@@ -1,6 +1,8 @@
-# Transaction Type IDs
-SALES_TYPES = (9, 13, 18, 19, 23, 27, 34, 35, 38, 39, 40, 41, 44, 47, 49, 50, 51, 52, 53)
-PURCHASE_TYPES = (11, 20, 22, 30, 32, 33, 36, 42, 45, 46, 48, 54)
+# Transaction Type IDs — verified from live MsTransType table
+# MS (Sales): 1,6,7,11,13,15,16,17,20,23,24,25,26,32,33,35,47,51,52
+SALES_TYPES = (1, 6, 7, 11, 13, 15, 16, 17, 20, 23, 24, 25, 26, 32, 33, 35, 47, 51, 52)
+# PU (Purchases): 8,10,14,21,22,27,28,30,31,38,49,53
+PURCHASE_TYPES = (8, 10, 14, 21, 22, 27, 28, 30, 31, 38, 49, 53)
 RECEIPT_CODES = ('BR', 'CR')
 PAYMENT_CODES = ('BP', 'CE')
 

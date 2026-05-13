@@ -142,70 +142,75 @@ Defines all transaction types used in the system.
 
 ## TransTypeID Reference
 
-### Sales (TransType code = MS)
+### Sales (TransType code = MS) — verified from live DB
+| ID | Description | Principal |
+|---|---|---|
+| 1  | Sales - IMFL (Diageo) | Diageo |
+| 20 | MS44 Diageo New MRP | Diageo |
+| 25 | IMFL (Diageo) | Diageo |
+| 6  | Sales - MCD No1 | USL / McDowell's |
+| 17 | Sales USL New MRP | USL / McDowell's |
+| 7  | Sales - UB Beer | UB / Kingfisher |
+| 24 | Sales - UB Beer New MRP | UB / Kingfisher |
+| 26 | Sales UB Wit Beer / Daman | UB / Kingfisher |
+| 13 | Sales UB Daman One Day | UB / Kingfisher |
+| 16 | Sales - Beer Institution | UB / Kingfisher |
+| 51 | Sale JD Imported | Brown-Forman |
+| 11 | Sales - Wines | Wines & Imports |
+| 47 | Sales - Wine Imported TG | Wines & Imports |
+| 32 | Sales - Wine (7 Peaks) | Wines & Imports |
+| 33 | Sales Wine Imported | Wines & Imports |
+| 23 | Sale Wild Drum Beer | Others |
+| 15 | Sales Quaffine | Others |
+| 35 | One Day Licence | Others |
+| 52 | Proforma Invoice | Others |
+
+### Purchases (TransType code = PU) — verified from live DB
 | ID | Description |
 |---|---|
-| 13 | Sales - IMFL Diageo |
-| 18 | Sales - McDowell's No.1 |
-| 19 | Sales - UB Beer |
-| 23 | Sales - Wines |
-| 38 | Sales - USL New MRP (United Spirits) |
-| 39 | Sales - UB Beer New MRP |
-| 40 | IMFL Diageo (new) |
-| 41 | Sales UB Wit Beer / Daman |
-| 47 | Sale Wild Drum Beer |
-| 49 | Sales Quaffine |
-| 51 | Sales - Beer Institution (KW + PCMC) |
-| 53 | Sale JD Imported |
-| 9  | Sales - Wine Imported TG |
-| 34 | Sales - Wine 7 Peaks |
-| 35 | Sales Wine Imported |
-| 44 | MS44 Diageo New MRP |
-| 27 | One Day Licence |
-| 50 | Sales UB Daman One Day |
-| 52 | Proforma Invoice |
+| 8  | Purchase - Kingfisher |
+| 10 | Purchase - Imported |
+| 14 | Purchase - Coral / Quaffine |
+| 21 | Purchase - Wine TG |
+| 22 | Purchase - Wild Drum Beer |
+| 27 | Purchase - UB Wit / Daman |
+| 28 | Purchase - Tonic Water |
+| 30 | Purchase - ONIV Wine |
+| 31 | Purchase - 7 Peaks |
+| 38 | Purchase - Diageo |
+| 49 | Purchase - IMFL |
+| 53 | Purchase - JD Imported |
 
-### Purchases (TransType code = PU)
-| ID | Description |
-|---|---|
-| 11 | Purchase - IMFL |
-| 20 | Purchase - Kingfisher |
-| 22 | Purchase - Imported |
-| 30 | Purchase - Diageo |
-| 32 | Purchase - ONIV Wine |
-| 33 | Purchase - 7 Peaks |
-| 36 | Purchase - Tonic Water |
-| 42 | Purchase - UB Wit / Daman |
-| 45 | Purchase - Wine TG |
-| 46 | Purchase - Wild Drum Beer |
-| 48 | Purchase - Coral / Quaffine |
-| 54 | Purchase - JD Imported |
-
-### Payments & Receipts
+### Payments & Receipts — verified from live DB
 | ID | Code | Description |
 |---|---|---|
-| 1  | BP | Bank Payment |
-| 2  | BR | Bank Receipt |
-| 12 | BP | Return Cheques |
-| 4  | CE | Cash Payments - Shah |
-| 5  | CR | Cash Receipts |
-| 28 | CE | Cash Pay - Sachin Bhosale |
-| 29 | CR | Cash Receipt - Sachin |
+| 3  | BR | Bank Receipts |
+| 5  | BR | Bank Receipt |
+| 41 | BR | Bank Receipt |
+| 37 | CR | Cash Receipt - Sachin |
+| 43 | CR | Cash Receipts |
+| 2  | BP | Bank Payment |
+| 4  | BP | Bank Payment |
+| 40 | BP | Bank Payment |
+| 50 | BP | Return Cheques |
+| 18 | CE | Cash Payments - Shah |
+| 36 | CE | Cash Pay - Sachin Bhosale |
 
 ### Other
 | ID | Code | Description |
 |---|---|---|
-| 10 | JV | Journal Entries |
-| 3  | SA | Breakages |
-| 21 | SA | Breakages - Transport |
-| 37 | SA | Sales Tonic Water |
-| 25 | LD | Load (internal stock) |
-| 26 | SO | Sales Order |
-| 55 | RO | Receipt Order |
-| 6  | CN | Credit Note - Purchase |
-| 7  | CN | Credit Note - Sales |
-| 8  | DN | Debit Note - Purchase |
-| 24 | DN | Debit Note - Sales |
+| 48 | JV | Journal Entries |
+| 9  | SA | Breakages - Transport |
+| 29 | SA | Sales Tonic Water |
+| 42 | SA | Breakages |
+| 19 | LD | Load Demo |
+| 39 | LD | Load |
+| 34 | SO | Sales Order |
+| 54 | RO | Receipt Order |
+| 44 | CN | Credit Note - Purchase |
+| 45 | CN | Credit Note - Sales |
+| 12 | DN | Debit Note - Sales |
+| 46 | DN | Debit Note - Purchase |
 
 ---
 
