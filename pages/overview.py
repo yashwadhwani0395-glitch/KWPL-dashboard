@@ -39,22 +39,14 @@ def render():
         WHERE t.ShortName='MS' {NOT_CANCELLED}
           AND d.DrCrIndicator='D' {date_filter}
     """)
-    # Outstanding = net ledger balance as of FY end date (matches ERP closing balance)
-    _cutoff     = st.session_state.get("outstanding_cutoff")
-    _cutoff_sql = f"AND h.VoucherDate < '{_cutoff}'" if _cutoff else ""
+    # Outstanding from MsPartyOpening — pre-computed, matches ERP exactly
+    # CloseBal = closing balance 31.03.2026; CloseBalTmp = running current balance
+    _cutoff  = st.session_state.get("outstanding_cutoff")
+    _bal_col = "CloseBal" if _cutoff else "CloseBalTmp"
     kpi_os = query(f"""
-        SELECT SUM(net_balance) AS total_outstanding
-        FROM (
-            SELECT d.PartyID,
-                   SUM(CASE WHEN d.DrCrIndicator='D' THEN d.Amount ELSE -d.Amount END) AS net_balance
-            FROM TrVocDetail d
-            JOIN TrVocHead h ON h.TransTypeID=d.TransTypeID AND h.VoucherNo=d.VoucherNo
-            WHERE ISNULL(h.Cancelled,'N') <> 'Y'
-              AND d.PartyID LIKE 'D%'
-              {_cutoff_sql}
-            GROUP BY d.PartyID
-            HAVING SUM(CASE WHEN d.DrCrIndicator='D' THEN d.Amount ELSE -d.Amount END) > 0
-        ) sub
+        SELECT SUM({_bal_col}) AS total_outstanding
+        FROM MsPartyOpening
+        WHERE LEFT(PartyID, 1) = 'D'
     """)
     stock_val = query(f"""
         SELECT SUM(sub.net_bottles * m.MrpBottRate) AS stock_value

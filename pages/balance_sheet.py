@@ -18,6 +18,7 @@ def render():
     date_filter = st.session_state.get("date_filter", "")
     cutoff      = st.session_state.get("outstanding_cutoff")
     cutoff_sql  = f"AND h.VoucherDate < '{cutoff}'" if cutoff else ""
+    bal_col     = "CloseBal" if cutoff else "CloseBalTmp"
 
     st.info(
         "This tab provides a management-level financial summary derived from "
@@ -25,7 +26,7 @@ def render():
         icon="ℹ️"
     )
 
-    # ── Top-line summary — 2 queries instead of 4 ────────────────────────────
+    # ── Top-line summary ──────────────────────────────────────────────────────
     pl = query(f"""
         SELECT
             SUM(CASE WHEN t.ShortName='MS'                 AND ISNULL(i.FreeItemYN,'N')<>'Y' THEN i.TotalAmount ELSE 0 END) AS revenue,
@@ -36,26 +37,24 @@ def render():
         WHERE (t.ShortName='MS' OR h.TransTypeID IN ({PURCHASE_IN}))
           {NOT_CANCELLED} {date_filter}
     """)
-    ar_ap = query(f"""
-        SELECT
-            (SELECT SUM(net_balance) FROM (
-                SELECT SUM(CASE WHEN d.DrCrIndicator='D' THEN d.Amount ELSE -d.Amount END) AS net_balance
-                FROM TrVocDetail d
-                JOIN TrVocHead h ON h.TransTypeID=d.TransTypeID AND h.VoucherNo=d.VoucherNo
-                WHERE ISNULL(h.Cancelled,'N') <> 'Y' AND d.PartyID LIKE 'D%'
-                  {cutoff_sql}
-                GROUP BY d.PartyID
-                HAVING SUM(CASE WHEN d.DrCrIndicator='D' THEN d.Amount ELSE -d.Amount END) > 0
-            ) r) AS receivables,
-            (SELECT SUM(net_balance) FROM (
-                SELECT SUM(CASE WHEN d.DrCrIndicator='C' THEN d.Amount ELSE -d.Amount END) AS net_balance
-                FROM TrVocDetail d
-                JOIN TrVocHead h ON h.TransTypeID=d.TransTypeID AND h.VoucherNo=d.VoucherNo
-                WHERE ISNULL(h.Cancelled,'N') <> 'Y' AND d.PartyID LIKE 'C%'
-                  {cutoff_sql}
-                GROUP BY d.PartyID
-                HAVING SUM(CASE WHEN d.DrCrIndicator='C' THEN d.Amount ELSE -d.Amount END) > 0
-            ) p) AS payables
+    # Receivables from MsPartyOpening — matches ERP debtor closing balance exactly
+    recv_q = query(f"""
+        SELECT SUM({bal_col}) AS receivables
+        FROM MsPartyOpening
+        WHERE LEFT(PartyID, 1) = 'D'
+    """)
+    # Payables still from TrVocDetail net ledger (C% suppliers)
+    pay_q = query(f"""
+        SELECT SUM(net_balance) AS payables
+        FROM (
+            SELECT SUM(CASE WHEN d.DrCrIndicator='C' THEN d.Amount ELSE -d.Amount END) AS net_balance
+            FROM TrVocDetail d
+            JOIN TrVocHead h ON h.TransTypeID=d.TransTypeID AND h.VoucherNo=d.VoucherNo
+            WHERE ISNULL(h.Cancelled,'N') <> 'Y' AND d.PartyID LIKE 'C%'
+              {cutoff_sql}
+            GROUP BY d.PartyID
+            HAVING SUM(CASE WHEN d.DrCrIndicator='C' THEN d.Amount ELSE -d.Amount END) > 0
+        ) p
     """)
     stock_val = query(f"""
         SELECT SUM(sub.net_bottles * m.MrpBottRate) AS mrp
@@ -74,10 +73,10 @@ def render():
         WHERE sub.net_bottles > 0
     """)
 
-    rev_val  = float(pl["revenue"][0]       or 0)
-    cogs_val = float(pl["cogs"][0]          or 0)
-    recv_val = float(ar_ap["receivables"][0] or 0)
-    pay_val  = float(ar_ap["payables"][0]   or 0)
+    rev_val  = float(pl["revenue"][0]           or 0)
+    cogs_val = float(pl["cogs"][0]              or 0)
+    recv_val = float(recv_q["receivables"][0]   or 0)
+    pay_val  = float(pay_q["payables"][0]       or 0)
     gross_profit = rev_val - cogs_val
     gp_pct = (gross_profit / rev_val * 100) if rev_val else 0
 
@@ -164,15 +163,11 @@ def render():
     # ── Receivables vs Payables trend ─────────────────────────────────────────
     st.subheader("Receivables vs Payables by Party (Top 10)")
     df_rec = query(f"""
-        SELECT TOP 10 p.PartyName AS party, SUM(d.RemainingAmt) AS receivable
-        FROM TrVocDetail d
-        JOIN TrVocHead h ON h.TransTypeID=d.TransTypeID AND h.VoucherNo=d.VoucherNo
-        JOIN MsPartyMaster p ON p.PartyID=d.PartyID
-        JOIN MsTransType t ON t.id_key=h.TransTypeID
-        WHERE t.ShortName='MS' {NOT_CANCELLED}
-          AND d.DrCrIndicator='D' AND d.RemainingAmt > 0
-          AND d.PartyID IS NOT NULL
-        GROUP BY p.PartyName ORDER BY receivable DESC
+        SELECT TOP 10 p.PartyName AS party, op.{bal_col} AS receivable
+        FROM MsPartyOpening op
+        JOIN MsPartyMaster p ON p.PartyID = op.PartyID
+        WHERE LEFT(op.PartyID, 1) = 'D' AND op.{bal_col} > 0
+        ORDER BY op.{bal_col} DESC
     """)
     df_pay = query(f"""
         SELECT TOP 10 p.PartyName AS party, SUM(d.RemainingAmt) AS payable

@@ -12,24 +12,17 @@ def render():
     date_filter = st.session_state.get("date_filter", "")
     cutoff      = st.session_state.get("outstanding_cutoff")           # None = today
     cutoff_sql  = f"AND h.VoucherDate < '{cutoff}'" if cutoff else ""
+    # CloseBal = FY end (31.03.2026); CloseBalTmp = running current balance
+    bal_col     = "CloseBal" if cutoff else "CloseBalTmp"
 
-    # ── KPIs — net ledger balance (DR - CR) for D% parties as of FY end date ──
+    # ── KPIs — from MsPartyOpening (pre-computed closing balances, matches ERP) ─
     kpi = query(f"""
         SELECT
-            COUNT(*)         AS debtors,
-            SUM(net_balance) AS total_outstanding,
-            MAX(net_balance) AS largest_balance
-        FROM (
-            SELECT d.PartyID,
-                   SUM(CASE WHEN d.DrCrIndicator='D' THEN d.Amount ELSE -d.Amount END) AS net_balance
-            FROM TrVocDetail d
-            JOIN TrVocHead h ON h.TransTypeID=d.TransTypeID AND h.VoucherNo=d.VoucherNo
-            WHERE ISNULL(h.Cancelled,'N') <> 'Y'
-              AND d.PartyID LIKE 'D%'
-              {cutoff_sql}
-            GROUP BY d.PartyID
-            HAVING SUM(CASE WHEN d.DrCrIndicator='D' THEN d.Amount ELSE -d.Amount END) > 0
-        ) sub
+            COUNT(CASE WHEN {bal_col} > 0 THEN 1 END) AS debtors,
+            SUM({bal_col})                             AS total_outstanding,
+            MAX({bal_col})                             AS largest_balance
+        FROM MsPartyOpening
+        WHERE LEFT(PartyID, 1) = 'D'
     """)
     kpi_row([
         {"label": "Active Debtors",    "value": kpi["debtors"][0],          "fmt": "qty"},
@@ -86,12 +79,19 @@ def render():
 
         st.divider()
 
-        # ── Top debtors chart ─────────────────────────────────────────────────
+        # ── Top debtors chart (from MsPartyOpening — matches ERP balance) ───────
         st.subheader("Top 20 Debtors by Outstanding")
-        df_top = df_age.head(20)[["customer", "total"]].copy()
-        st.plotly_chart(bar_chart(df_top, x="customer", y="total",
-                                  orientation="h", color_scale="Reds"),
-                        use_container_width=True, key="da_top_debtors")
+        df_top20 = query(f"""
+            SELECT TOP 20 p.PartyName AS customer, op.{bal_col} AS outstanding
+            FROM MsPartyOpening op
+            JOIN MsPartyMaster p ON p.PartyID = op.PartyID
+            WHERE LEFT(op.PartyID, 1) = 'D' AND op.{bal_col} > 0
+            ORDER BY op.{bal_col} DESC
+        """)
+        if not df_top20.empty:
+            st.plotly_chart(bar_chart(df_top20, x="customer", y="outstanding",
+                                      orientation="h", color_scale="Reds"),
+                            use_container_width=True, key="da_top_debtors")
 
         st.divider()
 
@@ -124,21 +124,14 @@ def render():
     st.subheader("Salesman-wise Outstanding")
     df_sm = query(f"""
         SELECT s.FullName AS salesman,
-               COUNT(DISTINCT sub.PartyID) AS debtors,
-               SUM(sub.net_balance)        AS outstanding
-        FROM (
-            SELECT h.SalesManID, d.PartyID,
-                   SUM(CASE WHEN d.DrCrIndicator='D' THEN d.Amount ELSE -d.Amount END) AS net_balance
-            FROM TrVocDetail d
-            JOIN TrVocHead h ON h.TransTypeID=d.TransTypeID AND h.VoucherNo=d.VoucherNo
-            WHERE ISNULL(h.Cancelled,'N') <> 'Y'
-              AND d.PartyID LIKE 'D%'
-              {cutoff_sql}
-            GROUP BY h.SalesManID, d.PartyID
-            HAVING SUM(CASE WHEN d.DrCrIndicator='D' THEN d.Amount ELSE -d.Amount END) > 0
-        ) sub
-        JOIN MsSalesmanMaster s ON s.SalesManID=sub.SalesManID
-        WHERE s.ResignDate IS NULL
+               COUNT(DISTINCT op.PartyID) AS debtors,
+               SUM(op.{bal_col})          AS outstanding
+        FROM MsPartyOpening op
+        JOIN MsPartyMaster p  ON p.PartyID    = op.PartyID
+        JOIN MsSalesmanMaster s ON s.SalesManID = p.SalesManID
+        WHERE LEFT(op.PartyID, 1) = 'D'
+          AND op.{bal_col} > 0
+          AND s.ResignDate IS NULL
         GROUP BY s.FullName ORDER BY outstanding DESC
     """)
     if not df_sm.empty:
