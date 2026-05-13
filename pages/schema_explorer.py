@@ -15,7 +15,8 @@ def _q(cur, sql):
 def render():
     st.header("🔍 Database Schema Explorer")
 
-    if st.button("📥 Build & Download Full Schema Report", type="primary"):
+    st.info("Loading schema report from database, please wait...")
+    if True:
         conn = get_connection()
         cur = conn.cursor(as_dict=True)
         report = {}
