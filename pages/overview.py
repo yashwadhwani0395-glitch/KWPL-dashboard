@@ -30,12 +30,18 @@ def render():
 
     # ── KPIs ─────────────────────────────────────────────────────────────────
     sales_kpi = query(f"""
-        SELECT SUM(i.TotalAmount)          AS total_sales,
-               COUNT(DISTINCT h.VoucherNo) AS total_invoices
+        SELECT SUM(i.TotalAmount) AS total_sales
         FROM TrVocHead h
         JOIN TrVocItem i ON i.TransTypeID=h.TransTypeID AND i.VoucherNo=h.VoucherNo
         JOIN MsTransType t ON t.id_key=h.TransTypeID
         WHERE t.ShortName='MS' {NOT_CANCELLED} {NOT_FREE}
+          {date_filter}
+    """)
+    invoice_kpi = query(f"""
+        SELECT COUNT(*) AS total_invoices
+        FROM TrVocHead h
+        JOIN MsTransType t ON t.id_key=h.TransTypeID
+        WHERE t.ShortName='MS' {NOT_CANCELLED}
           {date_filter}
     """)
     purchase_kpi = query(f"""
@@ -84,7 +90,7 @@ def render():
     kpi_row([
         {"label": "Total Sales",       "value": sales_kpi["total_sales"][0],        "fmt": "inr"},
         {"label": "Total Purchases",   "value": purchase_kpi["total_purchases"][0], "fmt": "inr"},
-        {"label": "Total Invoices",    "value": sales_kpi["total_invoices"][0],     "fmt": "qty"},
+        {"label": "Total Invoices",    "value": invoice_kpi["total_invoices"][0],   "fmt": "qty"},
         {"label": "Active Customers",  "value": cust_kpi["active_customers"][0],    "fmt": "qty"},
         {"label": "Outstanding",       "value": outstanding["total_outstanding"][0],"fmt": "inr"},
         {"label": "Stock Value (MRP)", "value": stock_val["stock_value"][0],        "fmt": "inr"},
