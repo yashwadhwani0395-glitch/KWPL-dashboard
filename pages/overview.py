@@ -27,34 +27,38 @@ def render():
     st.divider()
 
     # ── KPIs ─────────────────────────────────────────────────────────────────
-    kpi = query(f"""
-        SELECT
-            SUM(CASE WHEN h.TransTypeID IN ({SALES_IN})
-                     {NOT_CANCELLED} AND i.FreeItemYN<>'Y'
-                THEN i.TotalAmount ELSE 0 END)              AS total_sales,
-            SUM(CASE WHEN h.TransTypeID IN ({PURCHASE_IN})
-                     {NOT_CANCELLED} AND i.FreeItemYN<>'Y'
-                THEN i.TotalAmount ELSE 0 END)              AS total_purchases,
-            COUNT(DISTINCT CASE WHEN h.TransTypeID IN ({SALES_IN})
-                     {NOT_CANCELLED}
-                THEN h.VoucherNo END)                       AS total_invoices,
-            COUNT(DISTINCT CASE WHEN h.TransTypeID IN ({SALES_IN})
-                     {NOT_CANCELLED}
-                THEN d.PartyID END)                         AS active_customers
+    # Sales and invoices — ShortName='MS' is the authoritative sales filter
+    sales_kpi = query(f"""
+        SELECT SUM(i.TotalAmount)          AS total_sales,
+               COUNT(DISTINCT h.VoucherNo) AS total_invoices
         FROM TrVocHead h
-        LEFT JOIN TrVocItem i
-            ON i.TransTypeID=h.TransTypeID AND i.VoucherNo=h.VoucherNo
-        LEFT JOIN TrVocDetail d
-            ON d.TransTypeID=h.TransTypeID AND d.VoucherNo=h.VoucherNo
-            AND d.DrCrIndicator='D'
-        WHERE h.TransTypeID IN ({SALES_IN},{PURCHASE_IN})
+        JOIN TrVocItem i ON i.TransTypeID=h.TransTypeID AND i.VoucherNo=h.VoucherNo
+        JOIN MsTransType t ON t.id_key=h.TransTypeID
+        WHERE t.ShortName='MS' {NOT_CANCELLED} {NOT_FREE}
+          {date_filter}
+    """)
+    purchase_kpi = query(f"""
+        SELECT SUM(i.TotalAmount) AS total_purchases
+        FROM TrVocHead h
+        JOIN TrVocItem i ON i.TransTypeID=h.TransTypeID AND i.VoucherNo=h.VoucherNo
+        WHERE h.TransTypeID IN ({PURCHASE_IN}) {NOT_CANCELLED} {NOT_FREE}
+          {date_filter}
+    """)
+    cust_kpi = query(f"""
+        SELECT COUNT(DISTINCT d.PartyID) AS active_customers
+        FROM TrVocDetail d
+        JOIN TrVocHead h ON h.TransTypeID=d.TransTypeID AND h.VoucherNo=d.VoucherNo
+        JOIN MsTransType t ON t.id_key=h.TransTypeID
+        WHERE t.ShortName='MS' {NOT_CANCELLED}
+          AND d.DrCrIndicator='D' AND d.PartyID IS NOT NULL
           {date_filter}
     """)
     outstanding = query(f"""
         SELECT SUM(d.RemainingAmt) AS total_outstanding
         FROM TrVocDetail d
         JOIN TrVocHead h ON h.TransTypeID=d.TransTypeID AND h.VoucherNo=d.VoucherNo
-        WHERE h.TransTypeID IN ({SALES_IN}) {NOT_CANCELLED}
+        JOIN MsTransType t ON t.id_key=h.TransTypeID
+        WHERE t.ShortName='MS' {NOT_CANCELLED}
           AND d.DrCrIndicator='D' AND d.RemainingAmt > 0
           {date_filter}
     """)
@@ -76,11 +80,12 @@ def render():
     """)
 
     kpi_row([
-        {"label": "Total Sales",       "value": kpi["total_sales"][0],              "fmt": "inr"},
-        {"label": "Total Purchases",   "value": kpi["total_purchases"][0],           "fmt": "inr"},
-        {"label": "Total Invoices",    "value": kpi["total_invoices"][0],            "fmt": "qty"},
-        {"label": "Outstanding",       "value": outstanding["total_outstanding"][0], "fmt": "inr"},
-        {"label": "Stock Value (MRP)", "value": stock_val["stock_value"][0],         "fmt": "inr"},
+        {"label": "Total Sales",       "value": sales_kpi["total_sales"][0],        "fmt": "inr"},
+        {"label": "Total Purchases",   "value": purchase_kpi["total_purchases"][0], "fmt": "inr"},
+        {"label": "Total Invoices",    "value": sales_kpi["total_invoices"][0],     "fmt": "qty"},
+        {"label": "Active Customers",  "value": cust_kpi["active_customers"][0],    "fmt": "qty"},
+        {"label": "Outstanding",       "value": outstanding["total_outstanding"][0],"fmt": "inr"},
+        {"label": "Stock Value (MRP)", "value": stock_val["stock_value"][0],        "fmt": "inr"},
     ])
 
     st.divider()
@@ -90,11 +95,14 @@ def render():
     df_trend = query(f"""
         SELECT
             YEAR(h.VoucherDate)  AS yr, MONTH(h.VoucherDate) AS mo,
-            SUM(CASE WHEN h.TransTypeID IN ({SALES_IN})    THEN i.TotalAmount ELSE 0 END) AS sales,
-            SUM(CASE WHEN h.TransTypeID IN ({PURCHASE_IN}) THEN i.TotalAmount ELSE 0 END) AS purchases
+            SUM(CASE WHEN t.ShortName='MS'
+                     THEN i.TotalAmount ELSE 0 END)             AS sales,
+            SUM(CASE WHEN h.TransTypeID IN ({PURCHASE_IN})
+                     THEN i.TotalAmount ELSE 0 END)             AS purchases
         FROM TrVocHead h
         JOIN TrVocItem i ON i.TransTypeID=h.TransTypeID AND i.VoucherNo=h.VoucherNo
-        WHERE h.TransTypeID IN ({SALES_IN},{PURCHASE_IN})
+        JOIN MsTransType t ON t.id_key=h.TransTypeID
+        WHERE (t.ShortName='MS' OR h.TransTypeID IN ({PURCHASE_IN}))
           {NOT_CANCELLED} AND i.FreeItemYN<>'Y'
           {date_filter}
         GROUP BY YEAR(h.VoucherDate), MONTH(h.VoucherDate)
@@ -140,7 +148,7 @@ def render():
             FROM TrVocHead h
             JOIN TrVocItem i ON i.TransTypeID=h.TransTypeID AND i.VoucherNo=h.VoucherNo
             JOIN MsTransType t ON t.id_key=h.TransTypeID
-            WHERE h.TransTypeID IN ({SALES_IN}) {NOT_CANCELLED} {NOT_FREE}
+            WHERE t.ShortName='MS' {NOT_CANCELLED} {NOT_FREE}
               {date_filter}
             GROUP BY t.TransTypeName ORDER BY sales DESC
         """)
@@ -158,8 +166,9 @@ def render():
                    SUM(i.TotalBottleQty) AS bottles
             FROM TrVocItem i
             JOIN TrVocHead h ON h.TransTypeID=i.TransTypeID AND h.VoucherNo=i.VoucherNo
+            JOIN MsTransType t ON t.id_key=h.TransTypeID
             JOIN MsBrandMaster b ON b.BrandID=i.BrandID
-            WHERE h.TransTypeID IN ({SALES_IN}) {NOT_CANCELLED} {NOT_FREE}
+            WHERE t.ShortName='MS' {NOT_CANCELLED} {NOT_FREE}
               {date_filter}
             GROUP BY b.BrandName ORDER BY sales DESC
         """)
@@ -179,8 +188,9 @@ def render():
                    SUM(i.TotalAmount) AS sales, SUM(i.TotalBottleQty) AS bottles
             FROM TrVocItem i
             JOIN TrVocHead h ON h.TransTypeID=i.TransTypeID AND h.VoucherNo=i.VoucherNo
+            JOIN MsTransType t ON t.id_key=h.TransTypeID
             JOIN MsItemMaster m ON m.ItemID=i.ItemID
-            WHERE h.TransTypeID IN ({SALES_IN}) {NOT_CANCELLED} {NOT_FREE}
+            WHERE t.ShortName='MS' {NOT_CANCELLED} {NOT_FREE}
               {date_filter}
             GROUP BY m.ItemDescription ORDER BY sales DESC
         """)
