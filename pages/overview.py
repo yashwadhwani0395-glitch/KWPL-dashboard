@@ -1,33 +1,11 @@
 import streamlit as st
 import plotly.graph_objects as go
 from db import query
-from config import SALES_IN, PURCHASE_IN, NOT_CANCELLED, NOT_FREE, COLORS
+from config import (SALES_IN, PURCHASE_IN, NOT_CANCELLED, NOT_FREE, COLORS,
+                    brand_case, PRINCIPAL_COLORS, PRINCIPAL_ORDER)
 from utils import fmt_inr, fmt_qty, month_col
 from components.kpi_cards import kpi_row
 from components.charts import grouped_bar, bar_chart, pie_chart
-
-# ── Principal grouping ────────────────────────────────────────────────────────
-_PRIN_CASE = """
-    CASE
-        WHEN h.TransTypeID IN (1,20,25)         THEN 'Diageo'
-        WHEN h.TransTypeID IN (6,17)             THEN 'USL / McDowell''s'
-        WHEN h.TransTypeID IN (7,24,26,13,16)    THEN 'UB / Kingfisher'
-        WHEN h.TransTypeID IN (51)               THEN 'Brown-Forman'
-        WHEN h.TransTypeID IN (11,47,32,33)      THEN 'Wines & Imports'
-        ELSE 'Others'
-    END
-"""
-
-PRINCIPAL_COLORS = {
-    "Diageo":           "#7B2D8B",
-    "USL / McDowell's": "#E84855",
-    "UB / Kingfisher":  "#F7B731",
-    "Brown-Forman":     "#8B4513",
-    "Wines & Imports":  "#28A745",
-    "Others":           "#6C757D",
-}
-
-PRINCIPAL_ORDER = ["Diageo", "USL / McDowell's", "UB / Kingfisher", "Brown-Forman", "Wines & Imports", "Others"]
 
 
 def render():
@@ -168,7 +146,7 @@ def render():
     df_prin = query(f"""
         SELECT principal, SUM(sales) AS sales, SUM(bottles) AS bottles
         FROM (
-            SELECT {_PRIN_CASE} AS principal,
+            SELECT {brand_case("i")} AS principal,
                    i.TotalAmount AS sales, i.TotalBottleQty AS bottles
             FROM TrVocHead h
             JOIN TrVocItem i ON i.TransTypeID=h.TransTypeID AND i.VoucherNo=h.VoucherNo
@@ -209,7 +187,7 @@ def render():
         SELECT yr, mo, principal, SUM(sales) AS sales
         FROM (
             SELECT YEAR(h.VoucherDate) AS yr, MONTH(h.VoucherDate) AS mo,
-                   {_PRIN_CASE} AS principal,
+                   {brand_case("i")} AS principal,
                    i.TotalAmount AS sales
             FROM TrVocHead h
             JOIN TrVocItem i ON i.TransTypeID=h.TransTypeID AND i.VoucherNo=h.VoucherNo
