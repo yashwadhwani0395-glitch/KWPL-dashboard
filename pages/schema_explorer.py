@@ -517,12 +517,10 @@ def render():
                 SELECT TABLE_NAME
                 FROM INFORMATION_SCHEMA.TABLES
                 WHERE TABLE_TYPE='BASE TABLE'
-                  AND (TABLE_NAME LIKE '%Opening%' OR TABLE_NAME LIKE '%Balance%'
-                       OR TABLE_NAME LIKE '%opening%' OR TABLE_NAME LIKE '%balance%'
-                       OR TABLE_NAME LIKE '%Opening%')
+                  AND (TABLE_NAME LIKE '%%Opening%%' OR TABLE_NAME LIKE '%%Balance%%')
                 ORDER BY TABLE_NAME
             """),
-            ("W — Net ledger with opening balance included (DR-CR+OB for D% to 31.03.2026)", """
+            ("W — Net ledger D%% to 31.03.2026 via PartyID (old approach for reference)", """
                 SELECT
                     COUNT(*) AS debtors,
                     SUM(net_balance) AS total_outstanding
@@ -532,13 +530,13 @@ def render():
                     FROM TrVocDetail d
                     JOIN TrVocHead h ON h.TransTypeID=d.TransTypeID AND h.VoucherNo=d.VoucherNo
                     WHERE ISNULL(h.Cancelled,'N') <> 'Y'
-                      AND d.PartyID LIKE 'D%'
+                      AND d.PartyID LIKE 'D%%'
                       AND h.VoucherDate < '2026-04-01'
                     GROUP BY d.PartyID
                 ) all_parties
                 WHERE net_balance > 0
             """),
-            ("Y — TrVocDetail columns (what fields does it have?)", """
+            ("Y — TrVocDetail columns", """
                 SELECT COLUMN_NAME, DATA_TYPE, CHARACTER_MAXIMUM_LENGTH
                 FROM INFORMATION_SCHEMA.COLUMNS
                 WHERE TABLE_NAME='TrVocDetail'
@@ -550,74 +548,75 @@ def render():
                 WHERE TABLE_NAME='MsAccountHead'
                 ORDER BY ORDINAL_POSITION
             """),
-            ("Y3 — Find YR Wines account in MsAccountHead", """
-                SELECT AccountHeadID, AccountHeadName, SubheadID
+            ("Y3 — Find YR Wines account in MsAccountHead (correct column names)", """
+                SELECT AccHeadID, AccName, MainHeadID, SubHeadID
                 FROM MsAccountHead
-                WHERE AccountHeadName LIKE '%YR%' OR AccountHeadName LIKE '%Y R%'
-                   OR AccountHeadName LIKE '%VIRANSH%' OR AccountHeadName LIKE '%yr%'
+                WHERE AccName LIKE '%%YR%%' OR AccName LIKE '%%Y R%%'
+                   OR AccName LIKE '%%VIRANSH%%'
             """),
-            ("Y4 — TrVocDetail for YR Wines by AccountID (find correct outstanding)", """
+            ("Y4 — TrVocDetail for YR Wines by AccHeadID", """
                 SELECT t.ShortName, d.DrCrIndicator,
                        COUNT(DISTINCT h.VoucherNo) AS vouchers,
                        SUM(d.Amount) AS amount
                 FROM TrVocDetail d
                 JOIN TrVocHead h ON h.TransTypeID=d.TransTypeID AND h.VoucherNo=d.VoucherNo
                 JOIN MsTransType t ON t.id_key=h.TransTypeID
-                JOIN MsAccountHead a ON a.AccountHeadID=d.AccountID
+                JOIN MsAccountHead a ON a.AccHeadID=d.AccHeadID
                 WHERE ISNULL(h.Cancelled,'N') <> 'Y'
-                  AND (a.AccountHeadName LIKE '%YR%' OR a.AccountHeadName LIKE '%Y R%'
-                       OR a.AccountHeadName LIKE '%VIRANSH%')
+                  AND (a.AccName LIKE '%%YR%%' OR a.AccName LIKE '%%Y R%%'
+                       OR a.AccName LIKE '%%VIRANSH%%')
                   AND h.VoucherDate < '2026-04-01'
                 GROUP BY t.ShortName, d.DrCrIndicator
                 ORDER BY amount DESC
             """),
-            ("Y5 — MsAccountHead subhead/mainhead hierarchy for DEBTORS", """
-                SELECT xs.SubheadID, xs.Subhead, xm.MainheadID, xm.Mainhead
-                FROM XMainheadSubhead xs
-                JOIN XMainheadTypeMainhead xm ON xm.MainheadID=xs.MainheadID
-                WHERE xm.Mainhead LIKE '%DEBTOR%' OR xs.Subhead LIKE '%DEBTOR%'
-                   OR xm.Mainhead LIKE '%debtor%' OR xs.Subhead LIKE '%debtor%'
+            ("Y5 — XMainheadTypeMainhead all rows (find DEBTORS MainHeadID)", """
+                SELECT * FROM XMainheadTypeMainhead ORDER BY MainheadID
             """),
-            ("Y6 — All account heads under DEBTORS mainhead (if hierarchy found)", """
-                SELECT a.AccountHeadID, a.AccountHeadName, a.SubheadID
-                FROM MsAccountHead a
-                JOIN XMainheadSubhead xs ON xs.SubheadID=a.SubheadID
-                JOIN XMainheadTypeMainhead xm ON xm.MainheadID=xs.MainheadID
-                WHERE xm.Mainhead LIKE '%DEBTOR%' OR xm.Mainhead LIKE '%debtor%'
-                ORDER BY a.AccountHeadName
+            ("Y6 — MsAccountHead sample — first 10 rows (see MainHeadID values)", """
+                SELECT TOP 10 AccHeadID, AccName, MainHeadID, SubHeadID
+                FROM MsAccountHead
+                ORDER BY AccHeadID
             """),
-            ("Y7 — Outstanding by AccountID (DEBTORS mainhead) as on 31.03.2026", """
-                SELECT
-                    COUNT(*) AS debtor_count,
-                    SUM(net_balance) AS total_outstanding
-                FROM (
-                    SELECT d.AccountID,
-                           SUM(CASE WHEN d.DrCrIndicator='D' THEN d.Amount ELSE -d.Amount END) AS net_balance
-                    FROM TrVocDetail d
-                    JOIN TrVocHead h ON h.TransTypeID=d.TransTypeID AND h.VoucherNo=d.VoucherNo
-                    JOIN MsAccountHead a ON a.AccountHeadID=d.AccountID
-                    JOIN XMainheadSubhead xs ON xs.SubheadID=a.SubheadID
-                    JOIN XMainheadTypeMainhead xm ON xm.MainheadID=xs.MainheadID
-                    WHERE ISNULL(h.Cancelled,'N') <> 'Y'
-                      AND (xm.Mainhead LIKE '%DEBTOR%' OR xm.Mainhead LIKE '%debtor%')
-                      AND h.VoucherDate < '2026-04-01'
-                    GROUP BY d.AccountID
-                    HAVING SUM(CASE WHEN d.DrCrIndicator='D' THEN d.Amount ELSE -d.Amount END) > 0
-                ) sub
+            ("Y7 — MsAccountHead: accounts where MainHeadID matches DEBTORS", """
+                SELECT MainHeadID, COUNT(*) AS accounts
+                FROM MsAccountHead
+                GROUP BY MainHeadID
+                ORDER BY accounts DESC
             """),
-            ("Y8 — YR Wines outstanding via AccountID approach", """
-                SELECT a.AccountHeadName,
+            ("Y8 — YR Wines balance via AccHeadID from TrVocDetail", """
+                SELECT a.AccName,
                        SUM(CASE WHEN d.DrCrIndicator='D' THEN d.Amount ELSE 0 END) AS total_dr,
                        SUM(CASE WHEN d.DrCrIndicator='C' THEN d.Amount ELSE 0 END) AS total_cr,
                        SUM(CASE WHEN d.DrCrIndicator='D' THEN d.Amount ELSE -d.Amount END) AS net_balance
                 FROM TrVocDetail d
                 JOIN TrVocHead h ON h.TransTypeID=d.TransTypeID AND h.VoucherNo=d.VoucherNo
-                JOIN MsAccountHead a ON a.AccountHeadID=d.AccountID
+                JOIN MsAccountHead a ON a.AccHeadID=d.AccHeadID
                 WHERE ISNULL(h.Cancelled,'N') <> 'Y'
-                  AND (a.AccountHeadName LIKE '%YR%' OR a.AccountHeadName LIKE '%Y R%'
-                       OR a.AccountHeadName LIKE '%VIRANSH%')
+                  AND (a.AccName LIKE '%%YR%%' OR a.AccName LIKE '%%Y R%%'
+                       OR a.AccName LIKE '%%VIRANSH%%')
                   AND h.VoucherDate < '2026-04-01'
-                GROUP BY a.AccountHeadName, d.AccountID
+                GROUP BY a.AccName, d.AccHeadID
+            """),
+            ("Z — MsPartyOpening: D%% total CloseBal as on 31.03.2026 (ERP target = 58.41 Cr)", """
+                SELECT COUNT(*) AS debtors,
+                       SUM(CASE WHEN CloseBal > 0 THEN CloseBal ELSE 0 END) AS total_outstanding,
+                       SUM(CloseBal) AS net_all_parties
+                FROM MsPartyOpening
+                WHERE PartyID LIKE 'D%%'
+            """),
+            ("Z2 — MsPartyOpening: YR Wines (D06428) closing balance (ERP target = 1.39 Cr)", """
+                SELECT PartyID, AccHeadID, OpenBal, TotalDebit, TotalCredit,
+                       CloseBal, CloseBalTmp
+                FROM MsPartyOpening
+                WHERE PartyID = 'D06428'
+            """),
+            ("Z3 — MsPartyOpening: top 30 D%% debtors by CloseBal", """
+                SELECT TOP 30 p.AccName, op.PartyID, op.OpenBal,
+                       op.TotalDebit, op.TotalCredit, op.CloseBal
+                FROM MsPartyOpening op
+                JOIN MsAccountHead p ON p.AccHeadID=op.AccHeadID
+                WHERE op.PartyID LIKE 'D%%' AND op.CloseBal > 0
+                ORDER BY op.CloseBal DESC
             """),
             ]
 
