@@ -14,7 +14,7 @@ def _cfg(key: str, default: str = "") -> str:
         return os.getenv(key, default)
 
 
-def _connect():
+def get_connection():
     server_raw = _cfg("DB_SERVER", "localhost")
     if "," in server_raw:
         host, port = server_raw.split(",", 1)
@@ -33,7 +33,7 @@ def _connect():
 
 @st.cache_data(ttl=300, show_spinner=False)
 def query(sql: str, params=None) -> pd.DataFrame:
-    conn = _connect()
+    conn = get_connection()
     try:
         cursor = conn.cursor(as_dict=True)
         cursor.execute(sql, params or ())
