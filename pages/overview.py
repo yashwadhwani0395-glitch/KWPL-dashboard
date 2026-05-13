@@ -124,6 +124,39 @@ def render():
         ORDER BY yr, mo
     """)
 
+    # ── Diagnostics (temporary) ───────────────────────────────────────────────
+    with st.expander("🔍 Debug: Collections & Date Range", expanded=False):
+        diag_dates = query("""
+            SELECT MIN(VoucherDate) AS min_date, MAX(VoucherDate) AS max_date,
+                   COUNT(*) AS total_vouchers
+            FROM TrVocHead
+        """)
+        st.write("**All vouchers date range:**", diag_dates)
+
+        diag_rc = query("""
+            SELECT t.ShortName, COUNT(*) AS voucher_count
+            FROM TrVocHead h
+            JOIN MsTransType t ON t.id_key=h.TransTypeID
+            WHERE t.ShortName IN ('BR','CR','BP','CE')
+            GROUP BY t.ShortName
+        """)
+        st.write("**BR/CR/BP/CE voucher counts (no date filter):**", diag_rc)
+
+        diag_coll_raw = query(f"""
+            SELECT TOP 20 h.VoucherDate, h.TransTypeID, t.ShortName,
+                   d.DrCrIndicator, d.PartyID, d.Amount
+            FROM TrVocDetail d
+            JOIN TrVocHead h ON h.TransTypeID=d.TransTypeID AND h.VoucherNo=d.VoucherNo
+            JOIN MsTransType t ON t.id_key=h.TransTypeID
+            WHERE t.ShortName IN ('BR','CR')
+            ORDER BY h.VoucherDate DESC
+        """)
+        st.write("**Sample BR/CR TrVocDetail rows (newest 20):**", diag_coll_raw)
+
+        st.write(f"**df_coll rows:** {len(df_coll)}")
+        if not df_coll.empty:
+            st.dataframe(df_coll)
+
     if not df_trend.empty:
         df_trend = month_col(df_trend)
         if not df_coll.empty:
