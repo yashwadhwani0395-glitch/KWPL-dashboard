@@ -12,7 +12,8 @@ _PRIN_CASE = """
         WHEN h.TransTypeID IN (44,13,40)       THEN 'Diageo'
         WHEN h.TransTypeID IN (18,38)           THEN 'USL / McDowell''s'
         WHEN h.TransTypeID IN (19,39,41,51,50)  THEN 'UB / Kingfisher'
-        WHEN h.TransTypeID IN (23,9,34,35,53)   THEN 'Wines & Imports'
+        WHEN h.TransTypeID IN (53)              THEN 'Brown-Forman'
+        WHEN h.TransTypeID IN (23,9,34,35)      THEN 'Wines & Imports'
         ELSE 'Others'
     END
 """
@@ -21,11 +22,12 @@ PRINCIPAL_COLORS = {
     "Diageo":           "#7B2D8B",
     "USL / McDowell's": "#E84855",
     "UB / Kingfisher":  "#F7B731",
+    "Brown-Forman":     "#8B4513",
     "Wines & Imports":  "#28A745",
     "Others":           "#6C757D",
 }
 
-PRINCIPAL_ORDER = ["Diageo", "USL / McDowell's", "UB / Kingfisher", "Wines & Imports", "Others"]
+PRINCIPAL_ORDER = ["Diageo", "USL / McDowell's", "UB / Kingfisher", "Brown-Forman", "Wines & Imports", "Others"]
 
 
 def render():
