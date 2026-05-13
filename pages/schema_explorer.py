@@ -7,7 +7,7 @@ from db import get_connection, query
 def render():
     st.header("Database Schema Explorer")
 
-    tab_schema, tab_brands = st.tabs(["Schema Report", "Brand / Item Mapping"])
+    tab_schema, tab_brands, tab_diag = st.tabs(["Schema Report", "Brand / Item Mapping", "🔍 Diagnostics"])
 
     # ── Tab 1: full schema JSON dump ──────────────────────────────────────────
     with tab_schema:
@@ -150,3 +150,149 @@ def render():
                 "items.csv", "text/csv",
                 key="dl_items"
             )
+
+    # ── Tab 3: Diagnostics ────────────────────────────────────────────────────
+    with tab_diag:
+        st.subheader("Live Diagnostics — Collections / Sales / Outstanding")
+        st.caption("Runs targeted queries to debug the 3 known data issues.")
+
+        if st.button("Run Diagnostics", type="primary"):
+            with st.spinner("Running…"):
+                def dq(sql):
+                    try:
+                        return query(sql)
+                    except Exception as e:
+                        import pandas as pd
+                        return pd.DataFrame([{"ERROR": str(e)}])
+
+                # ── A. TrVocDetail column names ───────────────────────────────
+                st.markdown("### A. TrVocDetail — column names")
+                st.dataframe(dq("""
+                    SELECT COLUMN_NAME, DATA_TYPE
+                    FROM INFORMATION_SCHEMA.COLUMNS
+                    WHERE TABLE_NAME='TrVocDetail'
+                    ORDER BY ORDINAL_POSITION
+                """), use_container_width=True, hide_index=True)
+
+                # ── B. Sample BR receipt voucher — ALL columns ────────────────
+                st.markdown("### B. Sample BR receipt — TrVocDetail rows (all columns)")
+                st.dataframe(dq("""
+                    SELECT TOP 20 d.*
+                    FROM TrVocDetail d
+                    JOIN TrVocHead h  ON h.TransTypeID=d.TransTypeID AND h.VoucherNo=d.VoucherNo
+                    JOIN MsTransType t ON t.id_key=h.TransTypeID
+                    WHERE t.ShortName='BR'
+                    ORDER BY h.VoucherDate DESC
+                """), use_container_width=True, hide_index=True)
+
+                # ── C. Collections total — both DrCr sides ────────────────────
+                st.markdown("### C. Collections — totals by DrCrIndicator for BR/CR vouchers")
+                st.dataframe(dq("""
+                    SELECT
+                        d.DrCrIndicator,
+                        COUNT(*)         AS rows,
+                        SUM(d.Amount)    AS total_amount,
+                        COUNT(DISTINCT d.PartyID) AS distinct_parties
+                    FROM TrVocDetail d
+                    JOIN TrVocHead h  ON h.TransTypeID=d.TransTypeID AND h.VoucherNo=d.VoucherNo
+                    JOIN MsTransType t ON t.id_key=h.TransTypeID
+                    WHERE t.ShortName IN ('BR','CR')
+                      AND ISNULL(h.Cancelled,'N') <> 'Y'
+                    GROUP BY d.DrCrIndicator
+                """), use_container_width=True, hide_index=True)
+
+                # ── D. Collections total FY 2025-26 ──────────────────────────
+                st.markdown("### D. Collections — FY 2025-26 (Apr 2025 – Mar 2026)")
+                st.dataframe(dq("""
+                    SELECT
+                        d.DrCrIndicator,
+                        SUM(d.Amount) AS total_amount,
+                        COUNT(*)      AS rows
+                    FROM TrVocDetail d
+                    JOIN TrVocHead h  ON h.TransTypeID=d.TransTypeID AND h.VoucherNo=d.VoucherNo
+                    JOIN MsTransType t ON t.id_key=h.TransTypeID
+                    WHERE t.ShortName IN ('BR','CR')
+                      AND ISNULL(h.Cancelled,'N') <> 'Y'
+                      AND h.VoucherDate >= '2025-04-01'
+                      AND h.VoucherDate <= '2026-03-31'
+                    GROUP BY d.DrCrIndicator
+                """), use_container_width=True, hide_index=True)
+
+                # ── E. Sales total — with and without FY filter ───────────────
+                st.markdown("### E. Sales total — all time vs FY 2025-26")
+                st.dataframe(dq("""
+                    SELECT
+                        'All Time' AS period,
+                        SUM(i.TotalAmount) AS sales,
+                        COUNT(DISTINCT h.VoucherNo) AS vouchers_distinct,
+                        COUNT(*) AS voucher_rows,
+                        MIN(h.VoucherDate) AS earliest,
+                        MAX(h.VoucherDate) AS latest
+                    FROM TrVocHead h
+                    JOIN TrVocItem i ON i.TransTypeID=h.TransTypeID AND i.VoucherNo=h.VoucherNo
+                    JOIN MsTransType t ON t.id_key=h.TransTypeID
+                    WHERE t.ShortName='MS'
+                      AND ISNULL(h.Cancelled,'N') <> 'Y'
+                      AND ISNULL(i.FreeItemYN,'N') <> 'Y'
+                    UNION ALL
+                    SELECT
+                        'FY 2025-26' AS period,
+                        SUM(i.TotalAmount) AS sales,
+                        COUNT(DISTINCT h.VoucherNo) AS vouchers_distinct,
+                        COUNT(*) AS voucher_rows,
+                        MIN(h.VoucherDate) AS earliest,
+                        MAX(h.VoucherDate) AS latest
+                    FROM TrVocHead h
+                    JOIN TrVocItem i ON i.TransTypeID=h.TransTypeID AND i.VoucherNo=h.VoucherNo
+                    JOIN MsTransType t ON t.id_key=h.TransTypeID
+                    WHERE t.ShortName='MS'
+                      AND ISNULL(h.Cancelled,'N') <> 'Y'
+                      AND ISNULL(i.FreeItemYN,'N') <> 'Y'
+                      AND h.VoucherDate >= '2025-04-01'
+                      AND h.VoucherDate <= '2026-03-31'
+                """), use_container_width=True, hide_index=True)
+
+                # ── F. Outstanding — RemainingAmt check ──────────────────────
+                st.markdown("### F. Outstanding — RemainingAmt non-zero rows (all voucher types)")
+                st.dataframe(dq("""
+                    SELECT TOP 1
+                        SUM(CASE WHEN d.RemainingAmt > 0 THEN 1 ELSE 0 END) AS rows_with_remaining,
+                        SUM(CASE WHEN d.RemainingAmt > 0 THEN d.RemainingAmt ELSE 0 END) AS total_remaining,
+                        SUM(CASE WHEN d.RemainingAmt IS NULL THEN 1 ELSE 0 END) AS null_rows,
+                        COUNT(*) AS total_rows
+                    FROM TrVocDetail d
+                """), use_container_width=True, hide_index=True)
+
+                # ── G. Outstanding — for sales vouchers (MS), DrCr='D' ───────
+                st.markdown("### G. Outstanding — sales (MS) DrCrIndicator='D' with RemainingAmt > 0")
+                st.dataframe(dq("""
+                    SELECT
+                        COUNT(*) AS open_lines,
+                        COUNT(DISTINCT d.PartyID) AS debtors,
+                        SUM(d.RemainingAmt) AS total_outstanding,
+                        MIN(h.VoucherDate) AS oldest_invoice,
+                        MAX(h.VoucherDate) AS newest_invoice
+                    FROM TrVocDetail d
+                    JOIN TrVocHead h ON h.TransTypeID=d.TransTypeID AND h.VoucherNo=d.VoucherNo
+                    JOIN MsTransType t ON t.id_key=h.TransTypeID
+                    WHERE t.ShortName='MS'
+                      AND ISNULL(h.Cancelled,'N') <> 'Y'
+                      AND d.DrCrIndicator='D'
+                      AND d.RemainingAmt > 0
+                      AND d.PartyID IS NOT NULL
+                """), use_container_width=True, hide_index=True)
+
+                # ── H. Sample MS detail rows — to see actual RemainingAmt ─────
+                st.markdown("### H. Sample MS (sales) TrVocDetail rows — showing RemainingAmt")
+                st.dataframe(dq("""
+                    SELECT TOP 20
+                        h.VoucherDate, d.DrCrIndicator, d.Amount, d.RemainingAmt,
+                        d.PartyID, p.PartyName
+                    FROM TrVocDetail d
+                    JOIN TrVocHead h ON h.TransTypeID=d.TransTypeID AND h.VoucherNo=d.VoucherNo
+                    JOIN MsTransType t ON t.id_key=h.TransTypeID
+                    LEFT JOIN MsPartyMaster p ON p.PartyID=d.PartyID
+                    WHERE t.ShortName='MS'
+                      AND ISNULL(h.Cancelled,'N') <> 'Y'
+                    ORDER BY h.VoucherDate DESC
+                """), use_container_width=True, hide_index=True)
