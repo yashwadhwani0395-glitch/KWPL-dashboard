@@ -697,6 +697,171 @@ def render():
                       )
                     ORDER BY TABLE_NAME
                 """),
+                ("27 — ALL account prefixes in TrVocDetail: full universe of account types FY25-26", """
+                    SELECT
+                        LEFT(d.PartyID,1)  AS prefix,
+                        LEFT(d.PartyID,3)  AS sample_prefix,
+                        d.DrCrIndicator,
+                        COUNT(*)           AS rows,
+                        SUM(d.Amount)      AS total_amount,
+                        MIN(d.PartyID)     AS sample_id_min,
+                        MAX(d.PartyID)     AS sample_id_max
+                    FROM TrVocDetail d
+                    JOIN TrVocHead h ON h.TransTypeID=d.TransTypeID AND h.VoucherNo=d.VoucherNo
+                    WHERE ISNULL(h.Cancelled,'N') <> 'Y'
+                      AND h.VoucherDate >= '2025-04-01'
+                      AND h.VoucherDate <  '2026-04-01'
+                    GROUP BY LEFT(d.PartyID,1), LEFT(d.PartyID,3), d.DrCrIndicator
+                    ORDER BY total_amount DESC
+                """),
+                ("28 — Full double-entry for ONE MS sales voucher (both DR and CR sides)", """
+                    SELECT
+                        d.DrCrIndicator,
+                        d.PartyID,
+                        LEFT(d.PartyID,1)  AS prefix,
+                        p.PartyName,
+                        d.Amount,
+                        d.Narration
+                    FROM TrVocDetail d
+                    JOIN TrVocHead h ON h.TransTypeID=d.TransTypeID AND h.VoucherNo=d.VoucherNo
+                    JOIN MsTransType t ON t.id_key=h.TransTypeID
+                    LEFT JOIN MsPartyMaster p ON p.PartyID=d.PartyID
+                    WHERE t.ShortName='MS'
+                      AND ISNULL(h.Cancelled,'N') <> 'Y'
+                      AND h.VoucherDate >= '2025-04-01'
+                      AND h.VoucherDate <  '2026-04-01'
+                      AND h.VoucherNo IN (
+                          SELECT TOP 1 h2.VoucherNo
+                          FROM TrVocHead h2
+                          JOIN MsTransType t2 ON t2.id_key=h2.TransTypeID
+                          WHERE t2.ShortName='MS'
+                            AND ISNULL(h2.Cancelled,'N') <> 'Y'
+                            AND h2.VoucherDate >= '2025-04-01'
+                            AND h2.VoucherDate <  '2026-04-01'
+                          ORDER BY h2.VoucherDate, h2.VoucherNo
+                      )
+                    ORDER BY d.DrCrIndicator, d.Amount DESC
+                """),
+                ("29 — Full double-entry for ONE PU purchase voucher (both DR and CR sides)", """
+                    SELECT
+                        d.DrCrIndicator,
+                        d.PartyID,
+                        LEFT(d.PartyID,1)  AS prefix,
+                        p.PartyName,
+                        d.Amount,
+                        d.Narration
+                    FROM TrVocDetail d
+                    JOIN TrVocHead h ON h.TransTypeID=d.TransTypeID AND h.VoucherNo=d.VoucherNo
+                    JOIN MsTransType t ON t.id_key=h.TransTypeID
+                    LEFT JOIN MsPartyMaster p ON p.PartyID=d.PartyID
+                    WHERE t.ShortName='PU'
+                      AND ISNULL(h.Cancelled,'N') <> 'Y'
+                      AND h.VoucherDate >= '2025-04-01'
+                      AND h.VoucherDate <  '2026-04-01'
+                      AND h.VoucherNo IN (
+                          SELECT TOP 1 h2.VoucherNo
+                          FROM TrVocHead h2
+                          JOIN MsTransType t2 ON t2.id_key=h2.TransTypeID
+                          WHERE t2.ShortName='PU'
+                            AND ISNULL(h2.Cancelled,'N') <> 'Y'
+                            AND h2.VoucherDate >= '2025-04-01'
+                            AND h2.VoucherDate <  '2026-04-01'
+                          ORDER BY h2.VoucherDate, h2.VoucherNo
+                      )
+                    ORDER BY d.DrCrIndicator, d.Amount DESC
+                """),
+                ("30 — What accounts get CREDITED in MS/LD/PU53 outward vouchers? (the revenue-side accounts)", """
+                    SELECT
+                        t.ShortName,
+                        LEFT(d.PartyID,1)  AS cr_prefix,
+                        LEFT(d.PartyID,4)  AS cr_sample,
+                        p.PartyName        AS account_name,
+                        COUNT(*)           AS rows,
+                        SUM(d.Amount)      AS total_credited
+                    FROM TrVocDetail d
+                    JOIN TrVocHead h   ON h.TransTypeID=d.TransTypeID AND h.VoucherNo=d.VoucherNo
+                    JOIN MsTransType t ON t.id_key=h.TransTypeID
+                    LEFT JOIN MsPartyMaster p ON p.PartyID=d.PartyID
+                    WHERE t.ShortName IN ('MS','LD')
+                      AND ISNULL(h.Cancelled,'N') <> 'Y'
+                      AND d.DrCrIndicator='C'
+                      AND h.VoucherDate >= '2025-04-01'
+                      AND h.VoucherDate <  '2026-04-01'
+                    GROUP BY t.ShortName, LEFT(d.PartyID,1), LEFT(d.PartyID,4), p.PartyName
+                    ORDER BY total_credited DESC
+                """),
+                ("31 — What accounts get DEBITED in PU/BP/CE inward vouchers? (the purchase-side accounts)", """
+                    SELECT
+                        t.ShortName,
+                        LEFT(d.PartyID,1)  AS dr_prefix,
+                        LEFT(d.PartyID,4)  AS dr_sample,
+                        p.PartyName        AS account_name,
+                        COUNT(*)           AS rows,
+                        SUM(d.Amount)      AS total_debited
+                    FROM TrVocDetail d
+                    JOIN TrVocHead h   ON h.TransTypeID=d.TransTypeID AND h.VoucherNo=d.VoucherNo
+                    JOIN MsTransType t ON t.id_key=h.TransTypeID
+                    LEFT JOIN MsPartyMaster p ON p.PartyID=d.PartyID
+                    WHERE t.ShortName IN ('PU','BP','CE')
+                      AND ISNULL(h.Cancelled,'N') <> 'Y'
+                      AND d.DrCrIndicator='D'
+                      AND h.VoucherDate >= '2025-04-01'
+                      AND h.VoucherDate <  '2026-04-01'
+                    GROUP BY t.ShortName, LEFT(d.PartyID,1), LEFT(d.PartyID,4), p.PartyName
+                    ORDER BY total_debited DESC
+                """),
+                ("32 — Invoice count: distinct TPNo vs VoucherNo for all outward vouchers FY25-26", """
+                    SELECT
+                        t.ShortName,
+                        t.TransTypeName,
+                        COUNT(DISTINCT h.VoucherNo)                   AS distinct_voucher_nos,
+                        COUNT(DISTINCT NULLIF(CAST(h.TPNo AS VARCHAR),'0'))  AS distinct_tp_nos,
+                        COUNT(DISTINCT h.InvoiceNo)                   AS distinct_invoice_nos,
+                        MIN(CAST(h.VoucherDate AS DATE))              AS earliest,
+                        MAX(CAST(h.VoucherDate AS DATE))              AS latest
+                    FROM TrVocHead h
+                    JOIN MsTransType t ON t.id_key=h.TransTypeID
+                    WHERE ISNULL(h.Cancelled,'N') <> 'Y'
+                      AND h.VoucherDate >= '2025-04-01'
+                      AND h.VoucherDate <  '2026-04-01'
+                    GROUP BY t.ShortName, t.TransTypeName
+                    ORDER BY distinct_voucher_nos DESC
+                """),
+                ("33 — MsPartyMaster: all distinct PartyID prefixes and counts (full account type list)", """
+                    SELECT
+                        LEFT(PartyID,1)  AS prefix,
+                        COUNT(*)         AS party_count,
+                        MIN(PartyID)     AS sample_min,
+                        MAX(PartyID)     AS sample_max,
+                        MIN(PartyName)   AS sample_name_1,
+                        MAX(PartyName)   AS sample_name_2
+                    FROM MsPartyMaster
+                    GROUP BY LEFT(PartyID,1)
+                    ORDER BY party_count DESC
+                """),
+                ("34 — MsAccountHead: full account hierarchy (GL account types)", """
+                    SELECT * FROM MsAccountHead ORDER BY 1
+                """),
+                ("35 — CR side of ALL BR/CR receipts: which accounts are credited?", """
+                    SELECT
+                        t.ShortName,
+                        LEFT(d.PartyID,1)  AS prefix,
+                        LEFT(d.PartyID,4)  AS sample,
+                        p.PartyName        AS account_name,
+                        COUNT(*)           AS rows,
+                        SUM(d.Amount)      AS total_amount
+                    FROM TrVocDetail d
+                    JOIN TrVocHead h   ON h.TransTypeID=d.TransTypeID AND h.VoucherNo=d.VoucherNo
+                    JOIN MsTransType t ON t.id_key=h.TransTypeID
+                    LEFT JOIN MsPartyMaster p ON p.PartyID=d.PartyID
+                    WHERE t.ShortName IN ('BR','CR')
+                      AND ISNULL(h.Cancelled,'N') <> 'Y'
+                      AND d.DrCrIndicator='C'
+                      AND h.VoucherDate >= '2025-04-01'
+                      AND h.VoucherDate <  '2026-04-01'
+                    GROUP BY t.ShortName, LEFT(d.PartyID,1), LEFT(d.PartyID,4), p.PartyName
+                    ORDER BY total_amount DESC
+                """),
             ]
             import io, zipfile
 
