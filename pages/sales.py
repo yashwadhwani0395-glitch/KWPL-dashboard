@@ -59,12 +59,23 @@ def render():
         st.subheader("Sales by Principal")
         df_prin = query(f"""
             SELECT principal, SUM(sales) AS sales FROM (
+                -- MS standard sales (USL, UB, Diageo, wines, etc.)
                 SELECT {brand_case("m")} AS principal, i.TotalAmount AS sales
                 FROM TrVocHead h
                 JOIN TrVocItem i ON i.TransTypeID=h.TransTypeID AND i.VoucherNo=h.VoucherNo
                 JOIN MsTransType t ON t.id_key=h.TransTypeID
                 JOIN MsItemMaster m ON m.ItemID=i.ItemID
                 WHERE t.ShortName='MS' {NOT_CANCELLED} {NOT_FREE} {date_filter}
+                UNION ALL
+                -- BF/JD: billed via "Purchase JD Imported" (TransTypeID=53), not MS
+                SELECT {brand_case("m")} AS principal, i.TotalAmount AS sales
+                FROM TrVocHead h
+                JOIN TrVocItem i ON i.TransTypeID=h.TransTypeID AND i.VoucherNo=h.VoucherNo
+                JOIN MsItemMaster m ON m.ItemID=i.ItemID
+                WHERE h.TransTypeID=53
+                  AND ISNULL(h.Cancelled,'N') <> 'Y'
+                  AND ISNULL(i.FreeItemYN,'N') <> 'Y'
+                  {date_filter}
             ) t GROUP BY principal ORDER BY sales DESC
         """)
         if not df_prin.empty:
@@ -97,17 +108,19 @@ def render():
 
     with col_l:
         st.subheader("Top 15 Customers")
+        # MS/11+20 are batch vouchers with no individual customer DR entries; LD and
+        # MS/51/26/23 do DR customer D% accounts directly, covering ~38% of sales.
         df_c = query(f"""
             SELECT TOP 15 p.PartyName AS customer,
                    SUM(v.inv_total) AS sales,
-                   COUNT(*) AS invoices
+                   COUNT(DISTINCT CAST(v.TransTypeID AS VARCHAR)+'|'+v.VoucherNo) AS invoices
             FROM (
                 SELECT h.TransTypeID, h.VoucherNo, SUM(i.TotalAmount) AS inv_total
                 FROM TrVocHead h
                 JOIN TrVocItem i ON i.TransTypeID=h.TransTypeID AND i.VoucherNo=h.VoucherNo
                 JOIN MsTransType t ON t.id_key=h.TransTypeID
-                WHERE t.ShortName='MS' {NOT_CANCELLED} {NOT_FREE}
-                  {date_filter}
+                WHERE (t.ShortName IN ('MS','LD') OR h.TransTypeID=53)
+                  {NOT_CANCELLED} {NOT_FREE} {date_filter}
                 GROUP BY h.TransTypeID, h.VoucherNo
             ) v
             JOIN TrVocDetail d ON d.TransTypeID=v.TransTypeID AND d.VoucherNo=v.VoucherNo
@@ -124,23 +137,14 @@ def render():
         st.subheader("Salesman Performance")
         df_sm = query(f"""
             SELECT s.FullName AS salesman,
-                   SUM(v.inv_total) AS sales,
-                   COUNT(*) AS invoices,
-                   COUNT(DISTINCT d.PartyID) AS customers
-            FROM (
-                SELECT h.TransTypeID, h.VoucherNo, h.SalesManID,
-                       SUM(i.TotalAmount) AS inv_total
-                FROM TrVocHead h
-                JOIN TrVocItem i ON i.TransTypeID=h.TransTypeID AND i.VoucherNo=h.VoucherNo
-                JOIN MsTransType t ON t.id_key=h.TransTypeID
-                WHERE t.ShortName='MS' {NOT_CANCELLED} {NOT_FREE}
-                  {date_filter}
-                GROUP BY h.TransTypeID, h.VoucherNo, h.SalesManID
-            ) v
-            JOIN MsSalesmanMaster s ON s.SalesManID=v.SalesManID
-            JOIN TrVocDetail d ON d.TransTypeID=v.TransTypeID AND d.VoucherNo=v.VoucherNo
-            WHERE d.DrCrIndicator='D' AND d.PartyID IS NOT NULL
-              AND s.ResignDate IS NULL
+                   SUM(i.TotalAmount) AS sales,
+                   COUNT(DISTINCT CAST(h.TransTypeID AS VARCHAR)+'|'+h.VoucherNo) AS invoices
+            FROM TrVocHead h
+            JOIN TrVocItem i ON i.TransTypeID=h.TransTypeID AND i.VoucherNo=h.VoucherNo
+            JOIN MsTransType t ON t.id_key=h.TransTypeID
+            JOIN MsSalesmanMaster s ON s.SalesManID=h.SalesManID
+            WHERE t.ShortName='MS' {NOT_CANCELLED} {NOT_FREE}
+              {date_filter} AND s.ResignDate IS NULL
             GROUP BY s.FullName ORDER BY sales DESC
         """)
         if not df_sm.empty:
@@ -181,7 +185,7 @@ def render():
     if not df_sm.empty:
         st.divider()
         st.subheader("Salesman Detail")
-        df_disp = df_sm.copy()
-        df_disp["sales"] = df_disp["sales"].apply(lambda x: fmt_inr(x))
-        df_disp.columns = ["Salesman", "Total Sales", "Invoices", "Customers"]
+        df_disp = df_sm[["salesman", "sales", "invoices"]].copy()
+        df_disp["sales"] = df_disp["sales"].apply(fmt_inr)
+        df_disp.columns = ["Salesman", "Total Sales", "Invoices"]
         st.dataframe(df_disp, use_container_width=True, hide_index=True)

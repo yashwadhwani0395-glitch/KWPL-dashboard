@@ -42,7 +42,7 @@ def render():
         JOIN MsTransType t ON t.id_key=h.TransTypeID
         WHERE t.ShortName='MS' {NOT_CANCELLED} AND ISNULL(i.FreeItemYN,'N')<>'Y' {date_filter}
     """)
-    # Active customers = distinct D% parties on DR side of real product invoices
+    # Active customers = distinct D% parties on DR side of product invoices (MS + LD + BF/JD)
     kpi_ar = query(f"""
         SELECT COUNT(DISTINCT d.PartyID) AS active_customers
         FROM (
@@ -50,7 +50,8 @@ def render():
             FROM TrVocHead h
             JOIN TrVocItem i ON i.TransTypeID=h.TransTypeID AND i.VoucherNo=h.VoucherNo
             JOIN MsTransType t ON t.id_key=h.TransTypeID
-            WHERE t.ShortName='MS' {NOT_CANCELLED} {date_filter}
+            WHERE (t.ShortName IN ('MS','LD') OR h.TransTypeID=53)
+              {NOT_CANCELLED} {date_filter}
         ) v
         JOIN TrVocDetail d ON d.TransTypeID=v.TransTypeID AND d.VoucherNo=v.VoucherNo
         WHERE d.DrCrIndicator='D' AND LEFT(d.PartyID, 1) = 'D'
@@ -113,7 +114,9 @@ def render():
                SUM(d.Amount) AS collections
         FROM TrVocDetail d
         JOIN TrVocHead h ON h.TransTypeID=d.TransTypeID AND h.VoucherNo=d.VoucherNo
-        WHERE ISNULL(h.Cancelled,'N') <> 'Y'
+        JOIN MsTransType t ON t.id_key=h.TransTypeID
+        WHERE t.ShortName IN ('BR','CR')
+          AND ISNULL(h.Cancelled,'N') <> 'Y'
           AND d.DrCrIndicator='C' AND LEFT(d.PartyID, 1) = 'D'
           {date_filter}
         GROUP BY YEAR(h.VoucherDate), MONTH(h.VoucherDate)
@@ -145,7 +148,7 @@ def render():
     st.divider()
 
     # ── Sales by Principal ──────────────────────────────────────────────────────
-    # JOIN MsItemMaster m uses m.BrandID (correct source) — TrVocItem.BrandID is not reliable
+    # BF/JD brands are billed via TransTypeID=53 (Purchase JD Imported), not via MS.
     st.subheader("Sales by Principal")
     df_prin = query(f"""
         SELECT principal, SUM(sales) AS sales, SUM(bottles) AS bottles
@@ -156,7 +159,16 @@ def render():
             JOIN TrVocItem i  ON i.TransTypeID=h.TransTypeID AND i.VoucherNo=h.VoucherNo
             JOIN MsTransType t ON t.id_key=h.TransTypeID
             JOIN MsItemMaster m ON m.ItemID = i.ItemID
-            WHERE t.ShortName='MS' {NOT_CANCELLED} {NOT_FREE}
+            WHERE t.ShortName='MS' {NOT_CANCELLED} {NOT_FREE} {date_filter}
+            UNION ALL
+            SELECT {brand_case("m")} AS principal,
+                   i.TotalAmount AS sales, i.TotalBottleQty AS bottles
+            FROM TrVocHead h
+            JOIN TrVocItem i ON i.TransTypeID=h.TransTypeID AND i.VoucherNo=h.VoucherNo
+            JOIN MsItemMaster m ON m.ItemID = i.ItemID
+            WHERE h.TransTypeID=53
+              AND ISNULL(h.Cancelled,'N') <> 'Y'
+              AND ISNULL(i.FreeItemYN,'N') <> 'Y'
               {date_filter}
         ) t
         GROUP BY principal
@@ -200,13 +212,21 @@ def render():
         SELECT yr, mo, principal, SUM(sales) AS sales
         FROM (
             SELECT YEAR(h.VoucherDate) AS yr, MONTH(h.VoucherDate) AS mo,
-                   {brand_case("m")} AS principal,
-                   i.TotalAmount AS sales
+                   {brand_case("m")} AS principal, i.TotalAmount AS sales
             FROM TrVocHead h
             JOIN TrVocItem i  ON i.TransTypeID=h.TransTypeID AND i.VoucherNo=h.VoucherNo
             JOIN MsTransType t ON t.id_key=h.TransTypeID
             JOIN MsItemMaster m ON m.ItemID = i.ItemID
-            WHERE t.ShortName='MS' {NOT_CANCELLED} {NOT_FREE}
+            WHERE t.ShortName='MS' {NOT_CANCELLED} {NOT_FREE} {date_filter}
+            UNION ALL
+            SELECT YEAR(h.VoucherDate) AS yr, MONTH(h.VoucherDate) AS mo,
+                   {brand_case("m")} AS principal, i.TotalAmount AS sales
+            FROM TrVocHead h
+            JOIN TrVocItem i ON i.TransTypeID=h.TransTypeID AND i.VoucherNo=h.VoucherNo
+            JOIN MsItemMaster m ON m.ItemID = i.ItemID
+            WHERE h.TransTypeID=53
+              AND ISNULL(h.Cancelled,'N') <> 'Y'
+              AND ISNULL(i.FreeItemYN,'N') <> 'Y'
               {date_filter}
         ) t
         GROUP BY yr, mo, principal
@@ -300,18 +320,20 @@ def render():
     st.divider()
 
     # ── Top 10 Customers ──────────────────────────────────────────────────────
+    # Covers LD (beer deliveries) + direct-customer MS types + BF/JD (PU/53).
+    # MS/11 and MS/20 are batch vouchers with no individual customer DR — excluded naturally.
     st.subheader("Top 10 Customers by Sales")
     df_cust = query(f"""
         SELECT TOP 10 p.PartyName AS customer,
                SUM(v.inv_total) AS sales,
-               COUNT(*) AS invoices
+               COUNT(DISTINCT CAST(v.TransTypeID AS VARCHAR)+'|'+v.VoucherNo) AS invoices
         FROM (
             SELECT h.TransTypeID, h.VoucherNo, SUM(i.TotalAmount) AS inv_total
             FROM TrVocHead h
             JOIN TrVocItem i  ON i.TransTypeID=h.TransTypeID AND i.VoucherNo=h.VoucherNo
             JOIN MsTransType t ON t.id_key=h.TransTypeID
-            WHERE t.ShortName='MS' {NOT_CANCELLED} {NOT_FREE}
-              {date_filter}
+            WHERE (t.ShortName IN ('MS','LD') OR h.TransTypeID=53)
+              {NOT_CANCELLED} {NOT_FREE} {date_filter}
             GROUP BY h.TransTypeID, h.VoucherNo
         ) v
         JOIN TrVocDetail d ON d.TransTypeID=v.TransTypeID AND d.VoucherNo=v.VoucherNo
