@@ -52,7 +52,7 @@ def _release(conn):
                 pass
 
 
-@st.cache_data(ttl=1800, show_spinner=False)
+@st.cache_data(ttl=300, show_spinner=False)
 def query(sql: str, params=None) -> pd.DataFrame:
     conn = get_connection()
     ok = False

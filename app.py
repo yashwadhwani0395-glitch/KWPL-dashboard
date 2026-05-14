@@ -20,7 +20,7 @@ with st.sidebar:
     st.session_state["outstanding_cutoff"] = "2026-04-01"   # → uses CloseBal
 
     st.divider()
-    st.caption("Data is cached for 30 minutes.")
+    st.caption("Data refreshes every 5 minutes.")
     if st.button("🔄 Refresh Data", use_container_width=True):
         st.cache_data.clear()
         st.rerun()
