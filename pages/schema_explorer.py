@@ -332,6 +332,116 @@ def render():
                     FROM MsPartyOpening
                     WHERE LEFT(PartyID,1)='D'
                 """),
+                ("11 — Items in PURCHASE JD (TransTypeID=53) via MsItemMaster: BrandIDs", """
+                    SELECT TOP 30
+                        i.ItemID,
+                        m.BrandID,
+                        b.BrandName,
+                        i.ItemDescription,
+                        SUM(vi.TotalAmount)    AS total_amount,
+                        SUM(vi.TotalBottleQty) AS total_bottles
+                    FROM TrVocItem vi
+                    JOIN TrVocHead h ON h.TransTypeID=vi.TransTypeID AND h.VoucherNo=vi.VoucherNo
+                    LEFT JOIN MsItemMaster m ON m.ItemID=vi.ItemID
+                    LEFT JOIN MsBrandMaster b ON b.BrandID=m.BrandID
+                    LEFT JOIN MsItemMaster i ON i.ItemID=vi.ItemID
+                    WHERE vi.TransTypeID=53
+                      AND ISNULL(h.Cancelled,'N') <> 'Y'
+                      AND ISNULL(vi.FreeItemYN,'N') <> 'Y'
+                      AND h.VoucherDate >= '2025-04-01'
+                      AND h.VoucherDate <  '2026-04-01'
+                    GROUP BY i.ItemID, m.BrandID, b.BrandName, i.ItemDescription
+                    ORDER BY total_amount DESC
+                """),
+                ("12 — Find Jack Daniels / Brown Forman in MsItemMaster by description", """
+                    SELECT i.ItemID, i.ItemDescription, i.BrandID, b.BrandName,
+                           b.CompanyID, p.PartyName AS principal
+                    FROM MsItemMaster i
+                    LEFT JOIN MsBrandMaster b ON b.BrandID=i.BrandID
+                    LEFT JOIN MsPartyMaster p ON p.PartyID=b.CompanyID
+                    WHERE i.ItemDescription LIKE 'JACK%'
+                       OR i.ItemDescription LIKE '%JACK DANIEL%'
+                       OR i.ItemDescription LIKE '%WOODFORD%'
+                       OR i.ItemDescription LIKE '%GLEN DRONACH%'
+                       OR i.ItemDescription LIKE '%GLENDRONACH%'
+                    ORDER BY i.BrandID
+                """),
+                ("13 — ALL MS TrVocItem: total that joins vs drops MsItemMaster FY25-26", """
+                    SELECT
+                        'Joined MsItemMaster'  AS status,
+                        COUNT(*)               AS line_count,
+                        SUM(vi.TotalAmount)    AS total_amount,
+                        SUM(vi.TotalBottleQty) AS total_bottles
+                    FROM TrVocItem vi
+                    JOIN TrVocHead h   ON h.TransTypeID=vi.TransTypeID AND h.VoucherNo=vi.VoucherNo
+                    JOIN MsTransType t ON t.id_key=h.TransTypeID
+                    JOIN MsItemMaster m ON m.ItemID=vi.ItemID
+                    WHERE t.ShortName='MS'
+                      AND ISNULL(h.Cancelled,'N') <> 'Y'
+                      AND ISNULL(vi.FreeItemYN,'N') <> 'Y'
+                      AND h.VoucherDate >= '2025-04-01'
+                      AND h.VoucherDate <  '2026-04-01'
+                    UNION ALL
+                    SELECT
+                        'No MsItemMaster match' AS status,
+                        COUNT(*),
+                        SUM(vi.TotalAmount),
+                        SUM(vi.TotalBottleQty)
+                    FROM TrVocItem vi
+                    JOIN TrVocHead h   ON h.TransTypeID=vi.TransTypeID AND h.VoucherNo=vi.VoucherNo
+                    JOIN MsTransType t ON t.id_key=h.TransTypeID
+                    WHERE t.ShortName='MS'
+                      AND ISNULL(h.Cancelled,'N') <> 'Y'
+                      AND ISNULL(vi.FreeItemYN,'N') <> 'Y'
+                      AND h.VoucherDate >= '2025-04-01'
+                      AND h.VoucherDate <  '2026-04-01'
+                      AND NOT EXISTS (SELECT 1 FROM MsItemMaster mx WHERE mx.ItemID=vi.ItemID)
+                """),
+                ("14 — LD LOAD (TransTypeID=39): top brands via MsItemMaster FY25-26", """
+                    SELECT TOP 30
+                        m.BrandID,
+                        b.BrandName,
+                        COUNT(DISTINCT CAST(vi.TransTypeID AS VARCHAR)+'|'+vi.VoucherNo) AS vouchers,
+                        SUM(vi.TotalAmount)    AS total_amount,
+                        SUM(vi.TotalBottleQty) AS total_bottles
+                    FROM TrVocItem vi
+                    JOIN TrVocHead h   ON h.TransTypeID=vi.TransTypeID AND h.VoucherNo=vi.VoucherNo
+                    JOIN MsItemMaster m ON m.ItemID=vi.ItemID
+                    LEFT JOIN MsBrandMaster b ON b.BrandID=m.BrandID
+                    WHERE vi.TransTypeID=39
+                      AND ISNULL(h.Cancelled,'N') <> 'Y'
+                      AND ISNULL(vi.FreeItemYN,'N') <> 'Y'
+                      AND h.VoucherDate >= '2025-04-01'
+                      AND h.VoucherDate <  '2026-04-01'
+                    GROUP BY m.BrandID, b.BrandName
+                    ORDER BY total_amount DESC
+                """),
+                ("15 — LD LOAD party breakdown: does it debit customers (= customer billing)?", """
+                    SELECT
+                        d.DrCrIndicator,
+                        CASE
+                            WHEN LEFT(d.PartyID,1)='D' THEN 'Customer (D%)'
+                            WHEN LEFT(d.PartyID,1)='C' THEN 'Creditor (C%)'
+                            WHEN ISNULL(d.PartyID,'')='' THEN 'GL/Blank'
+                            ELSE 'Other'
+                        END AS party_type,
+                        COUNT(*) AS rows,
+                        SUM(d.Amount) AS total_amount
+                    FROM TrVocDetail d
+                    JOIN TrVocHead h   ON h.TransTypeID=d.TransTypeID AND h.VoucherNo=d.VoucherNo
+                    WHERE h.TransTypeID=39
+                      AND ISNULL(h.Cancelled,'N') <> 'Y'
+                      AND h.VoucherDate >= '2025-04-01'
+                      AND h.VoucherDate <  '2026-04-01'
+                    GROUP BY d.DrCrIndicator,
+                        CASE
+                            WHEN LEFT(d.PartyID,1)='D' THEN 'Customer (D%)'
+                            WHEN LEFT(d.PartyID,1)='C' THEN 'Creditor (C%)'
+                            WHEN ISNULL(d.PartyID,'')='' THEN 'GL/Blank'
+                            ELSE 'Other'
+                        END
+                    ORDER BY d.DrCrIndicator, total_amount DESC
+                """),
             ]
             import io, zipfile
 
