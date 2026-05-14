@@ -797,6 +797,40 @@ def render():
                 GROUP BY ISNULL(SchType,'NULL')
                 ORDER BY total_discount_amt DESC
             """),
+            ("AM — MsBrandMaster: all columns + data types", """
+                SELECT COLUMN_NAME, DATA_TYPE, CHARACTER_MAXIMUM_LENGTH
+                FROM INFORMATION_SCHEMA.COLUMNS
+                WHERE TABLE_NAME = 'MsBrandMaster'
+                ORDER BY ORDINAL_POSITION
+            """),
+            ("AN — MsBrandMaster sample rows (all columns, top 20 by BrandID)", """
+                SELECT TOP 20 * FROM MsBrandMaster ORDER BY BrandID
+            """),
+            ("AO — MsBrandMaster: brands with highest scheme discount (linked to principal)", """
+                SELECT TOP 30
+                    b.BrandID, b.BrandName,
+                    b.SchemeDiscount,
+                    b.SchemeDiscountAmt,
+                    b.CompanyID,
+                    p.PartyName AS principal_name,
+                    COUNT(DISTINCT m.ItemID) AS item_count,
+                    SUM(vi.TotalAmount)      AS sales_fy25,
+                    SUM(vi.SchDiscountAmt)   AS claimed_discount_fy25
+                FROM MsBrandMaster b
+                LEFT JOIN MsPartyMaster p  ON p.PartyID = b.CompanyID
+                LEFT JOIN MsItemMaster m   ON m.BrandID = b.BrandID
+                LEFT JOIN TrVocItem vi     ON vi.ItemID = m.ItemID
+                LEFT JOIN TrVocHead h      ON h.TransTypeID=vi.TransTypeID
+                                          AND h.VoucherNo=vi.VoucherNo
+                                          AND ISNULL(h.Cancelled,'N') <> 'Y'
+                                          AND h.VoucherDate >= '2025-04-01'
+                                          AND h.VoucherDate <  '2026-04-01'
+                LEFT JOIN MsTransType t    ON t.id_key = h.TransTypeID
+                                          AND t.ShortName = 'MS'
+                GROUP BY b.BrandID, b.BrandName, b.SchemeDiscount,
+                         b.SchemeDiscountAmt, b.CompanyID, p.PartyName
+                ORDER BY sales_fy25 DESC
+            """),
             ("AK — Sample MS items WHERE SchDiscountAmt > 0 (gross vs net: see rate x qty vs TotalAmount)", """
                 SELECT TOP 10
                     h.VoucherDate,
