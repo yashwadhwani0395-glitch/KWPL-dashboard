@@ -862,6 +862,279 @@ def render():
                     GROUP BY t.ShortName, LEFT(d.PartyID,1), LEFT(d.PartyID,4), p.PartyName
                     ORDER BY total_amount DESC
                 """),
+
+                # ── BLOCK A: BP/CE — excise-on-goods vs expense vouchers ─────────────
+                ("36 — BP/CE WITH product lines (excise duty on goods): account breakdown", """
+                    SELECT
+                        t.ShortName, t.TransTypeName,
+                        d.DrCrIndicator,
+                        LEFT(d.PartyID,1)               AS party_prefix,
+                        ISNULL(p.PartyName, d.PartyID)  AS account_name,
+                        COUNT(*)                         AS rows,
+                        SUM(d.Amount)                    AS total
+                    FROM TrVocDetail d
+                    JOIN TrVocHead h   ON h.TransTypeID=d.TransTypeID AND h.VoucherNo=d.VoucherNo
+                    JOIN MsTransType t ON t.id_key=h.TransTypeID
+                    LEFT JOIN MsPartyMaster p ON p.PartyID=d.PartyID
+                    WHERE t.ShortName IN ('BP','CE')
+                      AND ISNULL(h.Cancelled,'N') <> 'Y'
+                      AND h.VoucherDate >= '2025-04-01'
+                      AND h.VoucherDate <  '2026-04-01'
+                      AND EXISTS (
+                          SELECT 1 FROM TrVocItem vi
+                          WHERE vi.TransTypeID=h.TransTypeID AND vi.VoucherNo=h.VoucherNo
+                      )
+                    GROUP BY t.ShortName, t.TransTypeName, d.DrCrIndicator,
+                             LEFT(d.PartyID,1), ISNULL(p.PartyName, d.PartyID)
+                    ORDER BY t.ShortName, d.DrCrIndicator, total DESC
+                """),
+                ("37 — BP/CE WITHOUT product lines (pure expense payments): account breakdown", """
+                    SELECT
+                        t.ShortName, t.TransTypeName,
+                        d.DrCrIndicator,
+                        LEFT(d.PartyID,1)               AS party_prefix,
+                        ISNULL(p.PartyName, d.PartyID)  AS account_name,
+                        COUNT(*)                         AS rows,
+                        SUM(d.Amount)                    AS total
+                    FROM TrVocDetail d
+                    JOIN TrVocHead h   ON h.TransTypeID=d.TransTypeID AND h.VoucherNo=d.VoucherNo
+                    JOIN MsTransType t ON t.id_key=h.TransTypeID
+                    LEFT JOIN MsPartyMaster p ON p.PartyID=d.PartyID
+                    WHERE t.ShortName IN ('BP','CE')
+                      AND ISNULL(h.Cancelled,'N') <> 'Y'
+                      AND h.VoucherDate >= '2025-04-01'
+                      AND h.VoucherDate <  '2026-04-01'
+                      AND NOT EXISTS (
+                          SELECT 1 FROM TrVocItem vi
+                          WHERE vi.TransTypeID=h.TransTypeID AND vi.VoucherNo=h.VoucherNo
+                      )
+                    GROUP BY t.ShortName, t.TransTypeName, d.DrCrIndicator,
+                             LEFT(d.PartyID,1), ISNULL(p.PartyName, d.PartyID)
+                    ORDER BY t.ShortName, d.DrCrIndicator, total DESC
+                """),
+                ("38 — Sample expense BP/CE voucher (no product lines): full detail lines", """
+                    SELECT TOP 20
+                        h.VoucherDate, h.VoucherNo, t.ShortName, t.TransTypeName,
+                        h.Narration,
+                        d.DrCrIndicator,
+                        ISNULL(p.PartyName, d.PartyID) AS account,
+                        d.Amount
+                    FROM TrVocHead h
+                    JOIN MsTransType t ON t.id_key=h.TransTypeID
+                    JOIN TrVocDetail d ON d.TransTypeID=h.TransTypeID AND d.VoucherNo=h.VoucherNo
+                    LEFT JOIN MsPartyMaster p ON p.PartyID=d.PartyID
+                    WHERE t.ShortName IN ('BP','CE')
+                      AND ISNULL(h.Cancelled,'N') <> 'Y'
+                      AND h.VoucherDate >= '2025-04-01'
+                      AND h.VoucherDate <  '2026-04-01'
+                      AND NOT EXISTS (
+                          SELECT 1 FROM TrVocItem vi
+                          WHERE vi.TransTypeID=h.TransTypeID AND vi.VoucherNo=h.VoucherNo
+                      )
+                    ORDER BY h.VoucherDate DESC, h.VoucherNo
+                """),
+
+                # ── BLOCK B: VoucherFlag values ───────────────────────────────────────
+                ("39 — VoucherFlag: all distinct values, counts, and date ranges", """
+                    SELECT
+                        CASE WHEN VoucherFlag IS NULL THEN 'NULL'
+                             WHEN VoucherFlag = ''    THEN 'EMPTY'
+                             ELSE VoucherFlag
+                        END                         AS flag_value,
+                        t.ShortName,
+                        COUNT(*)                    AS vouchers,
+                        MIN(CAST(h.VoucherDate AS DATE)) AS earliest,
+                        MAX(CAST(h.VoucherDate AS DATE)) AS latest,
+                        MIN(h.VoucherNo)            AS sample_voucher
+                    FROM TrVocHead h
+                    JOIN MsTransType t ON t.id_key=h.TransTypeID
+                    WHERE h.VoucherDate >= '2025-04-01'
+                      AND h.VoucherDate <  '2026-04-01'
+                    GROUP BY
+                        CASE WHEN VoucherFlag IS NULL THEN 'NULL'
+                             WHEN VoucherFlag = ''    THEN 'EMPTY'
+                             ELSE VoucherFlag END,
+                        t.ShortName
+                    ORDER BY vouchers DESC
+                """),
+                ("40 — VoucherFlag: sample voucher detail for each non-empty flag", """
+                    SELECT TOP 30
+                        h.VoucherFlag, h.VoucherNo, h.VoucherDate,
+                        t.ShortName, t.TransTypeName,
+                        h.Narration,
+                        h.Cancelled
+                    FROM TrVocHead h
+                    JOIN MsTransType t ON t.id_key=h.TransTypeID
+                    WHERE h.VoucherDate >= '2025-04-01'
+                      AND h.VoucherDate <  '2026-04-01'
+                      AND h.VoucherFlag NOT IN ('', ' ')
+                      AND h.VoucherFlag IS NOT NULL
+                    ORDER BY h.VoucherFlag, h.VoucherDate DESC
+                """),
+
+                # ── BLOCK C: MsItemBatchOpening — opening stock ───────────────────────
+                ("41 — MsItemBatchOpening: all columns and data types", """
+                    SELECT COLUMN_NAME, DATA_TYPE, CHARACTER_MAXIMUM_LENGTH, IS_NULLABLE
+                    FROM INFORMATION_SCHEMA.COLUMNS
+                    WHERE TABLE_NAME = 'MsItemBatchOpening'
+                    ORDER BY ORDINAL_POSITION
+                """),
+                ("42 — MsItemBatchOpening: row count, distinct items, total qty and MRP value", """
+                    SELECT
+                        COUNT(*)                             AS total_rows,
+                        COUNT(DISTINCT o.ItemID)             AS distinct_items,
+                        SUM(o.OpeningQty)                    AS total_opening_qty,
+                        SUM(o.OpeningQty * m.MrpBottRate)    AS opening_mrp_value,
+                        MIN(o.OpeningQty)                    AS min_qty,
+                        MAX(o.OpeningQty)                    AS max_qty
+                    FROM MsItemBatchOpening o
+                    JOIN MsItemMaster m ON m.ItemID = o.ItemID
+                """),
+                ("43 — MsItemBatchOpening: top 20 items by opening qty", """
+                    SELECT TOP 20
+                        m.ItemDescription, b.BrandName,
+                        SUM(o.OpeningQty)                    AS opening_bottles,
+                        SUM(o.OpeningQty * m.MrpBottRate)    AS mrp_value
+                    FROM MsItemBatchOpening o
+                    JOIN MsItemMaster m   ON m.ItemID   = o.ItemID
+                    JOIN MsBrandMaster b  ON b.BrandID  = m.BrandID
+                    GROUP BY m.ItemDescription, b.BrandName
+                    ORDER BY opening_bottles DESC
+                """),
+
+                # ── BLOCK D: CN/DN — credit notes and debit notes ─────────────────────
+                ("44 — CN/DN: DR/CR breakdown by party type — who are they between?", """
+                    SELECT
+                        t.ShortName, t.TransTypeName,
+                        d.DrCrIndicator,
+                        CASE
+                            WHEN LEFT(d.PartyID,1)='D' THEN 'Customer (D%)'
+                            WHEN LEFT(d.PartyID,1)='C' THEN 'Supplier (C%)'
+                            WHEN ISNULL(d.PartyID,'')='' THEN 'GL / No party'
+                            ELSE 'Other: ' + LEFT(d.PartyID,2)
+                        END                           AS party_type,
+                        COUNT(*)                      AS rows,
+                        SUM(d.Amount)                 AS total,
+                        COUNT(DISTINCT d.VoucherNo)   AS vouchers
+                    FROM TrVocDetail d
+                    JOIN TrVocHead h   ON h.TransTypeID=d.TransTypeID AND h.VoucherNo=d.VoucherNo
+                    JOIN MsTransType t ON t.id_key=h.TransTypeID
+                    WHERE t.ShortName IN ('CN','DN')
+                      AND ISNULL(h.Cancelled,'N') <> 'Y'
+                      AND h.VoucherDate >= '2025-04-01'
+                      AND h.VoucherDate <  '2026-04-01'
+                    GROUP BY t.ShortName, t.TransTypeName, d.DrCrIndicator,
+                        CASE
+                            WHEN LEFT(d.PartyID,1)='D' THEN 'Customer (D%)'
+                            WHEN LEFT(d.PartyID,1)='C' THEN 'Supplier (C%)'
+                            WHEN ISNULL(d.PartyID,'')='' THEN 'GL / No party'
+                            ELSE 'Other: ' + LEFT(d.PartyID,2)
+                        END
+                    ORDER BY t.ShortName, total DESC
+                """),
+                ("45 — CN/DN: do they carry product lines (TrVocItem)?", """
+                    SELECT
+                        t.ShortName, t.TransTypeName,
+                        COUNT(DISTINCT h.VoucherNo)    AS total_vouchers,
+                        SUM(CASE WHEN vi.VoucherNo IS NOT NULL THEN 1 ELSE 0 END) AS vouchers_with_items,
+                        SUM(vi.TotalAmount)             AS item_total_amount,
+                        SUM(vi.TotalBottleQty)          AS item_total_bottles
+                    FROM TrVocHead h
+                    JOIN MsTransType t ON t.id_key=h.TransTypeID
+                    LEFT JOIN TrVocItem vi ON vi.TransTypeID=h.TransTypeID AND vi.VoucherNo=h.VoucherNo
+                    WHERE t.ShortName IN ('CN','DN')
+                      AND ISNULL(h.Cancelled,'N') <> 'Y'
+                      AND h.VoucherDate >= '2025-04-01'
+                      AND h.VoucherDate <  '2026-04-01'
+                    GROUP BY t.ShortName, t.TransTypeName
+                """),
+                ("46 — CN/DN: sample voucher — full header + detail + items for one CN and one DN", """
+                    SELECT
+                        h.VoucherDate, h.VoucherNo, t.ShortName,
+                        h.Narration,
+                        'DETAIL'                           AS line_type,
+                        d.DrCrIndicator,
+                        ISNULL(p.PartyName, d.PartyID)     AS account,
+                        d.Amount,
+                        NULL                               AS item_desc,
+                        NULL                               AS bottles
+                    FROM TrVocHead h
+                    JOIN MsTransType t ON t.id_key=h.TransTypeID
+                    JOIN TrVocDetail d ON d.TransTypeID=h.TransTypeID AND d.VoucherNo=h.VoucherNo
+                    LEFT JOIN MsPartyMaster p ON p.PartyID=d.PartyID
+                    WHERE h.VoucherNo IN (
+                        SELECT TOP 1 VoucherNo FROM TrVocHead hh
+                        JOIN MsTransType tt ON tt.id_key=hh.TransTypeID
+                        WHERE tt.ShortName='CN' AND ISNULL(hh.Cancelled,'N')<>'Y'
+                          AND hh.VoucherDate >= '2025-04-01' AND hh.VoucherDate < '2026-04-01'
+                        UNION ALL
+                        SELECT TOP 1 VoucherNo FROM TrVocHead hh
+                        JOIN MsTransType tt ON tt.id_key=hh.TransTypeID
+                        WHERE tt.ShortName='DN' AND ISNULL(hh.Cancelled,'N')<>'Y'
+                          AND hh.VoucherDate >= '2025-04-01' AND hh.VoucherDate < '2026-04-01'
+                    )
+                    ORDER BY h.VoucherDate, h.VoucherNo, d.DrCrIndicator
+                """),
+
+                # ── BLOCK E: Expenses ─────────────────────────────────────────────────
+                ("47 — All expense accounts: MsAccountHead rows that look like P&L expenses", """
+                    SELECT * FROM MsAccountHead
+                    ORDER BY 1
+                """),
+                ("48 — JV (Journal Entries): DR/CR breakdown by party type and account", """
+                    SELECT
+                        d.DrCrIndicator,
+                        CASE
+                            WHEN LEFT(d.PartyID,1)='D' THEN 'Customer (D%)'
+                            WHEN LEFT(d.PartyID,1)='C' THEN 'Supplier (C%)'
+                            WHEN ISNULL(d.PartyID,'')='' THEN 'GL / No party'
+                            ELSE 'Other: ' + LEFT(d.PartyID,2)
+                        END                           AS party_type,
+                        ISNULL(p.PartyName, d.PartyID) AS account_name,
+                        COUNT(*)                       AS rows,
+                        SUM(d.Amount)                  AS total,
+                        COUNT(DISTINCT d.VoucherNo)    AS vouchers
+                    FROM TrVocDetail d
+                    JOIN TrVocHead h   ON h.TransTypeID=d.TransTypeID AND h.VoucherNo=d.VoucherNo
+                    JOIN MsTransType t ON t.id_key=h.TransTypeID
+                    LEFT JOIN MsPartyMaster p ON p.PartyID=d.PartyID
+                    WHERE t.ShortName='JV'
+                      AND ISNULL(h.Cancelled,'N') <> 'Y'
+                      AND h.VoucherDate >= '2025-04-01'
+                      AND h.VoucherDate <  '2026-04-01'
+                    GROUP BY d.DrCrIndicator,
+                        CASE
+                            WHEN LEFT(d.PartyID,1)='D' THEN 'Customer (D%)'
+                            WHEN LEFT(d.PartyID,1)='C' THEN 'Supplier (C%)'
+                            WHEN ISNULL(d.PartyID,'')='' THEN 'GL / No party'
+                            ELSE 'Other: ' + LEFT(d.PartyID,2)
+                        END,
+                        ISNULL(p.PartyName, d.PartyID)
+                    ORDER BY total DESC
+                """),
+                ("49 — Total spend by expense account: all non-product BP/CE + JV DR entries", """
+                    SELECT
+                        ISNULL(p.PartyName, d.PartyID)  AS account_name,
+                        LEFT(d.PartyID,1)                AS prefix,
+                        t.ShortName                      AS trans_code,
+                        SUM(d.Amount)                    AS total_debit,
+                        COUNT(DISTINCT d.VoucherNo)       AS vouchers
+                    FROM TrVocDetail d
+                    JOIN TrVocHead h   ON h.TransTypeID=d.TransTypeID AND h.VoucherNo=d.VoucherNo
+                    JOIN MsTransType t ON t.id_key=h.TransTypeID
+                    LEFT JOIN MsPartyMaster p ON p.PartyID=d.PartyID
+                    WHERE t.ShortName IN ('BP','CE','JV')
+                      AND ISNULL(h.Cancelled,'N') <> 'Y'
+                      AND d.DrCrIndicator='D'
+                      AND h.VoucherDate >= '2025-04-01'
+                      AND h.VoucherDate <  '2026-04-01'
+                      AND NOT EXISTS (
+                          SELECT 1 FROM TrVocItem vi
+                          WHERE vi.TransTypeID=h.TransTypeID AND vi.VoucherNo=h.VoucherNo
+                      )
+                    GROUP BY ISNULL(p.PartyName, d.PartyID), LEFT(d.PartyID,1), t.ShortName
+                    ORDER BY total_debit DESC
+                """),
             ]
             import io, zipfile
 
