@@ -778,6 +778,64 @@ def render():
                     d.DrCrIndicator
                 ORDER BY total_amount DESC
             """),
+            ("AJ — SchType distinct values: total discount by type (company vs own flag?)", """
+                SELECT
+                    ISNULL(SchType,'NULL') AS SchType,
+                    COUNT(*) AS item_lines,
+                    COUNT(DISTINCT CAST(i.TransTypeID AS VARCHAR)+'|'+i.VoucherNo) AS vouchers,
+                    SUM(SchDiscountAmt)    AS total_discount_amt,
+                    SUM(SchVariableAmt)    AS total_variable_amt,
+                    SUM(i.TotalAmount)     AS total_inv_amount
+                FROM TrVocItem i
+                JOIN TrVocHead h ON h.TransTypeID=i.TransTypeID AND h.VoucherNo=i.VoucherNo
+                JOIN MsTransType t ON t.id_key=h.TransTypeID
+                WHERE t.ShortName='MS'
+                  AND ISNULL(h.Cancelled,'N') <> 'Y'
+                  AND ISNULL(i.FreeItemYN,'N') <> 'Y'
+                  AND h.VoucherDate >= '2025-04-01'
+                  AND h.VoucherDate <  '2026-04-01'
+                GROUP BY ISNULL(SchType,'NULL')
+                ORDER BY total_discount_amt DESC
+            """),
+            ("AK — Sample MS items WHERE SchDiscountAmt > 0 (gross vs net: see rate x qty vs TotalAmount)", """
+                SELECT TOP 10
+                    h.VoucherDate,
+                    i.ItemID,
+                    i.TotalBottleQty,
+                    i.BottleRate,
+                    i.TotalBottleQty * i.BottleRate AS gross_calc,
+                    i.TotalAmount,
+                    i.SchDiscountRate,
+                    i.SchDiscountAmt,
+                    i.SchVariableAmt,
+                    i.SchType,
+                    i.SchemeID,
+                    i.TotalAmount + i.SchDiscountAmt + i.SchVariableAmt AS back_calc_gross
+                FROM TrVocItem i
+                JOIN TrVocHead h ON h.TransTypeID=i.TransTypeID AND h.VoucherNo=i.VoucherNo
+                JOIN MsTransType t ON t.id_key=h.TransTypeID
+                WHERE t.ShortName='MS'
+                  AND ISNULL(h.Cancelled,'N') <> 'Y'
+                  AND i.SchDiscountAmt > 0
+                  AND h.VoucherDate >= '2025-04-01'
+                  AND h.VoucherDate <  '2026-04-01'
+            """),
+            ("AL — Total SchDiscountAmt and SchVariableAmt for all MS sales FY25-26", """
+                SELECT
+                    SUM(i.TotalAmount)     AS total_inv_amount,
+                    SUM(i.SchDiscountAmt)  AS total_scheme_discount,
+                    SUM(i.SchVariableAmt)  AS total_variable_discount,
+                    SUM(i.SchDiscountAmt + i.SchVariableAmt) AS total_all_discounts,
+                    SUM(i.TotalAmount) + SUM(i.SchDiscountAmt + i.SchVariableAmt) AS implied_gross
+                FROM TrVocItem i
+                JOIN TrVocHead h ON h.TransTypeID=i.TransTypeID AND h.VoucherNo=i.VoucherNo
+                JOIN MsTransType t ON t.id_key=h.TransTypeID
+                WHERE t.ShortName='MS'
+                  AND ISNULL(h.Cancelled,'N') <> 'Y'
+                  AND ISNULL(i.FreeItemYN,'N') <> 'Y'
+                  AND h.VoucherDate >= '2025-04-01'
+                  AND h.VoucherDate <  '2026-04-01'
+            """),
             ]
 
             import io, zipfile
