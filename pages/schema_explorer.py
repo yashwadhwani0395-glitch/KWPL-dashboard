@@ -831,6 +831,112 @@ def render():
                          b.SchemeDiscountAmt, b.CompanyID, p.PartyName
                 ORDER BY sales_fy25 DESC
             """),
+            ("AP — Find all tables with 'Scheme' or 'Discount' in name", """
+                SELECT TABLE_NAME
+                FROM INFORMATION_SCHEMA.TABLES
+                WHERE TABLE_TYPE='BASE TABLE'
+                  AND (TABLE_NAME LIKE '%Scheme%' OR TABLE_NAME LIKE '%Discount%')
+                ORDER BY TABLE_NAME
+            """),
+            ("AQ — MsSchemeDiscount columns (if exists)", """
+                SELECT COLUMN_NAME, DATA_TYPE, CHARACTER_MAXIMUM_LENGTH
+                FROM INFORMATION_SCHEMA.COLUMNS
+                WHERE TABLE_NAME = 'MsSchemeDiscount'
+                ORDER BY ORDINAL_POSITION
+            """),
+            ("AR — MsSchemeDiscount sample rows (top 20)", """
+                SELECT TOP 20 * FROM MsSchemeDiscount ORDER BY 1
+            """),
+            ("AS — DN SALES: TrVocItem entries - do discounts live here?", """
+                SELECT TOP 20
+                    i.TransTypeID, i.VoucherNo, i.SerialNo,
+                    i.ItemID, i.TotalBottleQty, i.CaseQty,
+                    i.BottleRate, i.CaseRate, i.TotalAmount,
+                    i.SchDiscountAmt, i.SchVariableAmt, i.FreeItemYN
+                FROM TrVocItem i
+                JOIN TrVocHead h ON h.TransTypeID=i.TransTypeID AND h.VoucherNo=i.VoucherNo
+                JOIN MsTransType t ON t.id_key=h.TransTypeID
+                WHERE t.ShortName='DN'
+                  AND ISNULL(h.Cancelled,'N') <> 'Y'
+                  AND h.VoucherDate >= '2025-04-01'
+                  AND h.VoucherDate <  '2026-04-01'
+                ORDER BY h.VoucherDate DESC
+            """),
+            ("AT — DN SALES: total TrVocItem amount vs TrVocDetail amount FY25-26", """
+                SELECT
+                    'TrVocItem'  AS source,
+                    COUNT(DISTINCT CAST(i.TransTypeID AS VARCHAR)+'|'+i.VoucherNo) AS vouchers,
+                    SUM(i.TotalAmount)    AS total_amount,
+                    SUM(i.SchDiscountAmt) AS total_scheme_disc
+                FROM TrVocItem i
+                JOIN TrVocHead h ON h.TransTypeID=i.TransTypeID AND h.VoucherNo=i.VoucherNo
+                JOIN MsTransType t ON t.id_key=h.TransTypeID
+                WHERE t.ShortName='DN'
+                  AND ISNULL(h.Cancelled,'N') <> 'Y'
+                  AND h.VoucherDate >= '2025-04-01'
+                  AND h.VoucherDate <  '2026-04-01'
+                UNION ALL
+                SELECT
+                    'TrVocDetail_CR' AS source,
+                    COUNT(DISTINCT CAST(d.TransTypeID AS VARCHAR)+'|'+d.VoucherNo) AS vouchers,
+                    SUM(d.Amount) AS total_amount,
+                    0 AS total_scheme_disc
+                FROM TrVocDetail d
+                JOIN TrVocHead h ON h.TransTypeID=d.TransTypeID AND h.VoucherNo=d.VoucherNo
+                JOIN MsTransType t ON t.id_key=h.TransTypeID
+                WHERE t.ShortName='DN'
+                  AND d.DrCrIndicator='C'
+                  AND ISNULL(h.Cancelled,'N') <> 'Y'
+                  AND h.VoucherDate >= '2025-04-01'
+                  AND h.VoucherDate <  '2026-04-01'
+                UNION ALL
+                SELECT
+                    'TrVocDetail_DR' AS source,
+                    COUNT(DISTINCT CAST(d.TransTypeID AS VARCHAR)+'|'+d.VoucherNo) AS vouchers,
+                    SUM(d.Amount) AS total_amount,
+                    0 AS total_scheme_disc
+                FROM TrVocDetail d
+                JOIN TrVocHead h ON h.TransTypeID=d.TransTypeID AND h.VoucherNo=d.VoucherNo
+                JOIN MsTransType t ON t.id_key=h.TransTypeID
+                WHERE t.ShortName='DN'
+                  AND d.DrCrIndicator='D'
+                  AND ISNULL(h.Cancelled,'N') <> 'Y'
+                  AND h.VoucherDate >= '2025-04-01'
+                  AND h.VoucherDate <  '2026-04-01'
+            """),
+            ("AU — DN SALES: breakdown by party type (customer vs supplier vs GL)", """
+                SELECT
+                    d.DrCrIndicator,
+                    CASE
+                        WHEN LEFT(d.PartyID,1)='D' THEN 'Customer (D%)'
+                        WHEN LEFT(d.PartyID,1)='C' THEN 'Creditor/Principal (C%)'
+                        WHEN ISNULL(d.PartyID,'')='' THEN 'GL/Blank'
+                        ELSE 'Other: '+LEFT(d.PartyID,1)
+                    END AS party_type,
+                    COUNT(*) AS rows,
+                    SUM(d.Amount) AS total_amount
+                FROM TrVocDetail d
+                JOIN TrVocHead h ON h.TransTypeID=d.TransTypeID AND h.VoucherNo=d.VoucherNo
+                JOIN MsTransType t ON t.id_key=h.TransTypeID
+                WHERE t.ShortName='DN'
+                  AND ISNULL(h.Cancelled,'N') <> 'Y'
+                  AND h.VoucherDate >= '2025-04-01'
+                  AND h.VoucherDate <  '2026-04-01'
+                GROUP BY d.DrCrIndicator,
+                    CASE
+                        WHEN LEFT(d.PartyID,1)='D' THEN 'Customer (D%)'
+                        WHEN LEFT(d.PartyID,1)='C' THEN 'Creditor/Principal (C%)'
+                        WHEN ISNULL(d.PartyID,'')='' THEN 'GL/Blank'
+                        ELSE 'Other: '+LEFT(d.PartyID,1)
+                    END
+                ORDER BY d.DrCrIndicator, total_amount DESC
+            """),
+            ("AV — MsTransType: all DN-type transaction types", """
+                SELECT id_key, ShortName, TransTypeName
+                FROM MsTransType
+                WHERE ShortName LIKE 'DN%' OR TransTypeName LIKE '%Debit%' OR TransTypeName LIKE '%debit%'
+                ORDER BY ShortName, TransTypeName
+            """),
             ("AK — Sample MS items WHERE SchDiscountAmt > 0 (gross vs net: see rate x qty vs TotalAmount)", """
                 SELECT TOP 10
                     h.VoucherDate,
