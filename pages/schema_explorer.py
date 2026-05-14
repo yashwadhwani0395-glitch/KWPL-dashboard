@@ -665,6 +665,28 @@ def render():
                   AND h.VoucherDate >= '2025-04-01'
                   AND h.VoucherDate <  '2026-04-01'
             """),
+            ("AD — LOAD DEMO (LD) breakdown FY25-26: party types debited (are these customer sales?)", """
+                SELECT d.DrCrIndicator,
+                       CASE WHEN LEFT(d.PartyID,1)='D' THEN 'Customer (D%)'
+                            WHEN LEFT(d.PartyID,1)='C' THEN 'Supplier (C%)'
+                            WHEN d.PartyID IS NULL OR LTRIM(RTRIM(d.PartyID))='' THEN 'GL/Blank'
+                            ELSE 'Other: '+LEFT(d.PartyID,1) END AS party_type,
+                       COUNT(*) AS rows,
+                       SUM(d.Amount) AS total_amount
+                FROM TrVocDetail d
+                JOIN TrVocHead h ON h.TransTypeID=d.TransTypeID AND h.VoucherNo=d.VoucherNo
+                JOIN MsTransType t ON t.id_key=h.TransTypeID
+                WHERE t.ShortName='LD' AND t.TransTypeName LIKE '%%DEMO%%'
+                  AND ISNULL(h.Cancelled,'N') <> 'Y'
+                  AND h.VoucherDate >= '2025-04-01'
+                  AND h.VoucherDate <  '2026-04-01'
+                GROUP BY d.DrCrIndicator,
+                         CASE WHEN LEFT(d.PartyID,1)='D' THEN 'Customer (D%)'
+                              WHEN LEFT(d.PartyID,1)='C' THEN 'Supplier (C%)'
+                              WHEN d.PartyID IS NULL OR LTRIM(RTRIM(d.PartyID))='' THEN 'GL/Blank'
+                              ELSE 'Other: '+LEFT(d.PartyID,1) END
+                ORDER BY total_amount DESC
+            """),
             ("AC — Top 15 brands by sales FY25-26 via MsItemMaster join (verify principal mapping)", """
                 SELECT TOP 15
                     b.BrandName, b.BrandID,

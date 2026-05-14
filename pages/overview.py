@@ -16,24 +16,18 @@ def render():
     st.divider()
 
     # ── KPIs ──────────────────────────────────────────────────────────────────
-    # Total Sales: credits to GL accounts (NULL/blank PartyID) on MS vouchers.
-    # Covers ALL MS transaction types including those with no TrVocItem entries,
-    # so the figure matches the ERP P&L revenue total.
-    kpi_sales = query(f"""
-        SELECT SUM(d.Amount) AS total_sales
-        FROM TrVocDetail d
-        JOIN TrVocHead h ON h.TransTypeID=d.TransTypeID AND h.VoucherNo=d.VoucherNo
-        JOIN MsTransType t ON t.id_key=h.TransTypeID
-        WHERE t.ShortName='MS'
-          AND d.DrCrIndicator='C'
-          AND (d.PartyID IS NULL OR LTRIM(RTRIM(d.PartyID)) = '')
-          {NOT_CANCELLED} {date_filter}
-    """)
-    kpi_pur = query(f"""
-        SELECT SUM(CASE WHEN ISNULL(i.FreeItemYN,'N')<>'Y' THEN i.TotalAmount ELSE 0 END) AS total_purchases
+    # Total Sales from TrVocItem (product-level, excludes free items).
+    # Combined query also fetches purchases to save a round-trip.
+    kpi_vol = query(f"""
+        SELECT
+            SUM(CASE WHEN t.ShortName='MS'
+                     AND ISNULL(i.FreeItemYN,'N')<>'Y' THEN i.TotalAmount ELSE 0 END) AS total_sales,
+            SUM(CASE WHEN h.TransTypeID IN ({PURCHASE_IN})
+                     AND ISNULL(i.FreeItemYN,'N')<>'Y' THEN i.TotalAmount ELSE 0 END) AS total_purchases
         FROM TrVocHead h
         JOIN TrVocItem i ON i.TransTypeID=h.TransTypeID AND i.VoucherNo=h.VoucherNo
-        WHERE h.TransTypeID IN ({PURCHASE_IN})
+        JOIN MsTransType t ON t.id_key=h.TransTypeID
+        WHERE (t.ShortName='MS' OR h.TransTypeID IN ({PURCHASE_IN}))
           {NOT_CANCELLED} {date_filter}
     """)
     # Invoice count: only vouchers with actual product lines (excludes accounting-only entries)
@@ -82,8 +76,8 @@ def render():
     """)
 
     kpi_row([
-        {"label": "Total Sales",       "value": kpi_sales["total_sales"][0],    "fmt": "inr"},
-        {"label": "Total Purchases",   "value": kpi_pur["total_purchases"][0],  "fmt": "inr"},
+        {"label": "Total Sales",       "value": kpi_vol["total_sales"][0],      "fmt": "inr"},
+        {"label": "Total Purchases",   "value": kpi_vol["total_purchases"][0],  "fmt": "inr"},
         {"label": "Total Invoices",    "value": kpi_cnt["total_invoices"][0],   "fmt": "qty"},
         {"label": "Active Customers",  "value": kpi_ar["active_customers"][0],  "fmt": "qty"},
         {"label": "Outstanding",       "value": kpi_os["total_outstanding"][0], "fmt": "inr"},
