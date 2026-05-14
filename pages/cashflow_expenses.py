@@ -32,7 +32,7 @@ def render():
         JOIN MsTransType t ON t.id_key=h.TransTypeID
         WHERE t.ShortName IN ('BR','CR')
           AND ISNULL(h.Cancelled,'N') <> 'Y'
-          AND d.DrCrIndicator='C'
+          AND d.DrCrIndicator='D'
           AND LEFT(d.PartyID,1)='D'
           {date_filter}
     """)
