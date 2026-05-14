@@ -7,24 +7,36 @@ from utils import fmt_inr, fmt_qty, month_col
 from components.kpi_cards import kpi_row
 from components.charts import grouped_bar, bar_chart, pie_chart
 
+_CR = 10_000_000  # 1 Crore
+
 
 def render():
     st.header("Business Overview")
     date_filter = st.session_state.get("date_filter", "")
     st.divider()
 
-    # ── KPIs — merged into 3 queries ─────────────────────────────────────────
-    kpi_vol = query(f"""
-        SELECT
-            SUM(CASE WHEN t.ShortName='MS'                 AND ISNULL(i.FreeItemYN,'N')<>'Y' THEN i.TotalAmount ELSE 0 END) AS total_sales,
-            SUM(CASE WHEN h.TransTypeID IN ({PURCHASE_IN}) AND ISNULL(i.FreeItemYN,'N')<>'Y' THEN i.TotalAmount ELSE 0 END) AS total_purchases
-        FROM TrVocHead h
-        JOIN TrVocItem i ON i.TransTypeID=h.TransTypeID AND i.VoucherNo=h.VoucherNo
+    # ── KPIs ──────────────────────────────────────────────────────────────────
+    # Total Sales: credits to GL accounts (NULL/blank PartyID) on MS vouchers.
+    # Covers ALL MS transaction types including those with no TrVocItem entries,
+    # so the figure matches the ERP P&L revenue total.
+    kpi_sales = query(f"""
+        SELECT SUM(d.Amount) AS total_sales
+        FROM TrVocDetail d
+        JOIN TrVocHead h ON h.TransTypeID=d.TransTypeID AND h.VoucherNo=d.VoucherNo
         JOIN MsTransType t ON t.id_key=h.TransTypeID
-        WHERE (t.ShortName='MS' OR h.TransTypeID IN ({PURCHASE_IN}))
+        WHERE t.ShortName='MS'
+          AND d.DrCrIndicator='C'
+          AND (d.PartyID IS NULL OR LTRIM(RTRIM(d.PartyID)) = '')
           {NOT_CANCELLED} {date_filter}
     """)
-    # Count only vouchers that have actual product lines (exclude pure accounting entries)
+    kpi_pur = query(f"""
+        SELECT SUM(CASE WHEN ISNULL(i.FreeItemYN,'N')<>'Y' THEN i.TotalAmount ELSE 0 END) AS total_purchases
+        FROM TrVocHead h
+        JOIN TrVocItem i ON i.TransTypeID=h.TransTypeID AND i.VoucherNo=h.VoucherNo
+        WHERE h.TransTypeID IN ({PURCHASE_IN})
+          {NOT_CANCELLED} {date_filter}
+    """)
+    # Invoice count: only vouchers with actual product lines (excludes accounting-only entries)
     kpi_cnt = query(f"""
         SELECT COUNT(DISTINCT CAST(h.TransTypeID AS VARCHAR)+'|'+h.VoucherNo) AS total_invoices
         FROM TrVocHead h
@@ -32,7 +44,7 @@ def render():
         JOIN MsTransType t ON t.id_key=h.TransTypeID
         WHERE t.ShortName='MS' {NOT_CANCELLED} {date_filter}
     """)
-    # Active customers = distinct D% parties on invoices that have items
+    # Active customers = distinct D% parties on DR side of real product invoices
     kpi_ar = query(f"""
         SELECT COUNT(DISTINCT d.PartyID) AS active_customers
         FROM (
@@ -45,8 +57,6 @@ def render():
         JOIN TrVocDetail d ON d.TransTypeID=v.TransTypeID AND d.VoucherNo=v.VoucherNo
         WHERE d.DrCrIndicator='D' AND LEFT(d.PartyID, 1) = 'D'
     """)
-    # Outstanding from MsPartyOpening — pre-computed, matches ERP exactly
-    # CloseBal = closing balance 31.03.2026; CloseBalTmp = running current balance
     _cutoff  = st.session_state.get("outstanding_cutoff")
     _bal_col = "CloseBal" if _cutoff else "CloseBalTmp"
     kpi_os = query(f"""
@@ -72,25 +82,25 @@ def render():
     """)
 
     kpi_row([
-        {"label": "Total Sales",       "value": kpi_vol["total_sales"][0],       "fmt": "inr"},
-        {"label": "Total Purchases",   "value": kpi_vol["total_purchases"][0],   "fmt": "inr"},
-        {"label": "Total Invoices",    "value": kpi_cnt["total_invoices"][0],    "fmt": "qty"},
-        {"label": "Active Customers",  "value": kpi_ar["active_customers"][0],    "fmt": "qty"},
-        {"label": "Outstanding",       "value": kpi_os["total_outstanding"][0],  "fmt": "inr"},
-        {"label": "Stock Value (MRP)", "value": stock_val["stock_value"][0],        "fmt": "inr"},
+        {"label": "Total Sales",       "value": kpi_sales["total_sales"][0],    "fmt": "inr"},
+        {"label": "Total Purchases",   "value": kpi_pur["total_purchases"][0],  "fmt": "inr"},
+        {"label": "Total Invoices",    "value": kpi_cnt["total_invoices"][0],   "fmt": "qty"},
+        {"label": "Active Customers",  "value": kpi_ar["active_customers"][0],  "fmt": "qty"},
+        {"label": "Outstanding",       "value": kpi_os["total_outstanding"][0], "fmt": "inr"},
+        {"label": "Stock Value (MRP)", "value": stock_val["stock_value"][0],    "fmt": "inr"},
     ])
 
     st.divider()
 
-    # ── Monthly Trend: Sales / Collections / Purchases ────────────────────────
+    # ── Monthly Trend: Sales / Collections / Purchases ─────────────────────────
     st.subheader("Monthly Trend — Sales, Collections & Purchases")
     df_trend = query(f"""
         SELECT
             YEAR(h.VoucherDate) AS yr, MONTH(h.VoucherDate) AS mo,
             SUM(CASE WHEN t.ShortName='MS'
-                     THEN i.TotalAmount ELSE 0 END)  AS sales,
+                     THEN i.TotalAmount ELSE 0 END) AS sales,
             SUM(CASE WHEN h.TransTypeID IN ({PURCHASE_IN})
-                     THEN i.TotalAmount ELSE 0 END)  AS purchases
+                     THEN i.TotalAmount ELSE 0 END) AS purchases
         FROM TrVocHead h
         JOIN TrVocItem i ON i.TransTypeID=h.TransTypeID AND i.VoucherNo=h.VoucherNo
         JOIN MsTransType t ON t.id_key=h.TransTypeID
@@ -100,14 +110,13 @@ def render():
         GROUP BY YEAR(h.VoucherDate), MONTH(h.VoucherDate)
         ORDER BY yr, mo
     """)
-    # Collections = all credits to customer (D%) ledger accounts in the period
     df_coll = query(f"""
         SELECT YEAR(h.VoucherDate) AS yr, MONTH(h.VoucherDate) AS mo,
                SUM(d.Amount) AS collections
         FROM TrVocDetail d
         JOIN TrVocHead h ON h.TransTypeID=d.TransTypeID AND h.VoucherNo=d.VoucherNo
         WHERE ISNULL(h.Cancelled,'N') <> 'Y'
-          AND d.DrCrIndicator='C' AND d.PartyID LIKE 'D%'
+          AND d.DrCrIndicator='C' AND LEFT(d.PartyID, 1) = 'D'
           {date_filter}
         GROUP BY YEAR(h.VoucherDate), MONTH(h.VoucherDate)
         ORDER BY yr, mo
@@ -117,30 +126,38 @@ def render():
         df_trend = month_col(df_trend)
         if not df_coll.empty:
             df_coll = month_col(df_coll)
-            df_trend = df_trend.merge(df_coll[["month", "collections"]], on="month", how="left").fillna(0)
+            df_trend = df_trend.merge(
+                df_coll[["month", "collections"]], on="month", how="left"
+            ).fillna(0)
         else:
             df_trend["collections"] = 0
-        st.plotly_chart(
-            grouped_bar(df_trend, x="month", series=[
-                {"col": "sales",       "name": "Sales",       "color": COLORS["sales"]},
-                {"col": "collections", "name": "Collections", "color": COLORS["collection"]},
-                {"col": "purchases",   "name": "Purchases",   "color": COLORS["purchase"]},
-            ]),
-            use_container_width=True, key="ov_monthly"
-        )
+
+        for col in ["sales", "collections", "purchases"]:
+            df_trend[f"{col}_cr"] = df_trend[col] / _CR
+
+        fig = grouped_bar(df_trend, x="month", series=[
+            {"col": "sales_cr",       "name": "Sales",       "color": COLORS["sales"]},
+            {"col": "collections_cr", "name": "Collections", "color": COLORS["collection"]},
+            {"col": "purchases_cr",   "name": "Purchases",   "color": COLORS["purchase"]},
+        ])
+        fig.update_layout(yaxis_title="₹ Crores")
+        fig.update_traces(hovertemplate="%{x}<br>₹%{y:.2f} Cr<extra></extra>")
+        st.plotly_chart(fig, use_container_width=True, key="ov_monthly")
 
     st.divider()
 
-    # ── Sales by Principal ────────────────────────────────────────────────────
+    # ── Sales by Principal ──────────────────────────────────────────────────────
+    # JOIN MsItemMaster m uses m.BrandID (correct source) — TrVocItem.BrandID is not reliable
     st.subheader("Sales by Principal")
     df_prin = query(f"""
         SELECT principal, SUM(sales) AS sales, SUM(bottles) AS bottles
         FROM (
-            SELECT {brand_case("i")} AS principal,
+            SELECT {brand_case("m")} AS principal,
                    i.TotalAmount AS sales, i.TotalBottleQty AS bottles
             FROM TrVocHead h
-            JOIN TrVocItem i ON i.TransTypeID=h.TransTypeID AND i.VoucherNo=h.VoucherNo
+            JOIN TrVocItem i  ON i.TransTypeID=h.TransTypeID AND i.VoucherNo=h.VoucherNo
             JOIN MsTransType t ON t.id_key=h.TransTypeID
+            JOIN MsItemMaster m ON m.ItemID = i.ItemID
             WHERE t.ShortName='MS' {NOT_CANCELLED} {NOT_FREE}
               {date_filter}
         ) t
@@ -155,34 +172,42 @@ def render():
         with col_l:
             fig_pie = pie_chart(df_prin, "principal", "sales", "Share by Value",
                                 colors=prin_colors)
+            fig_pie.update_traces(
+                textinfo="percent+label",
+                hovertemplate="<b>%{label}</b><br>₹%{value:,.0f}<br>%{percent}<extra></extra>",
+            )
             st.plotly_chart(fig_pie, use_container_width=True, key="ov_prin_pie")
 
         with col_r:
+            df_pr = df_prin.copy()
+            df_pr["sales_cr"] = df_pr["sales"] / _CR
             fig_bar = go.Figure(go.Bar(
-                x=df_prin["sales"],
-                y=df_prin["principal"],
+                x=df_pr["sales_cr"],
+                y=df_pr["principal"],
                 orientation="h",
                 marker_color=prin_colors,
                 text=df_prin["sales"].apply(fmt_inr),
                 textposition="auto",
             ))
             fig_bar.update_layout(
-                xaxis_title="₹", yaxis={"categoryorder": "total ascending"},
+                xaxis_title="₹ Crores",
+                yaxis={"categoryorder": "total ascending"},
                 margin=dict(t=10, b=10),
             )
             st.plotly_chart(fig_bar, use_container_width=True, key="ov_prin_bar")
 
-    # ── Monthly Sales by Principal (stacked) ──────────────────────────────────
+    # ── Monthly Sales by Principal (stacked) ───────────────────────────────────
     st.subheader("Monthly Sales by Principal")
     df_pm = query(f"""
         SELECT yr, mo, principal, SUM(sales) AS sales
         FROM (
             SELECT YEAR(h.VoucherDate) AS yr, MONTH(h.VoucherDate) AS mo,
-                   {brand_case("i")} AS principal,
+                   {brand_case("m")} AS principal,
                    i.TotalAmount AS sales
             FROM TrVocHead h
-            JOIN TrVocItem i ON i.TransTypeID=h.TransTypeID AND i.VoucherNo=h.VoucherNo
+            JOIN TrVocItem i  ON i.TransTypeID=h.TransTypeID AND i.VoucherNo=h.VoucherNo
             JOIN MsTransType t ON t.id_key=h.TransTypeID
+            JOIN MsItemMaster m ON m.ItemID = i.ItemID
             WHERE t.ShortName='MS' {NOT_CANCELLED} {NOT_FREE}
               {date_filter}
         ) t
@@ -203,20 +228,21 @@ def render():
             fig_stack.add_trace(go.Bar(
                 name=p,
                 x=df_wide["month"],
-                y=df_wide[p],
+                y=df_wide[p] / _CR,
                 marker_color=PRINCIPAL_COLORS.get(p, "#6C757D"),
+                hovertemplate="<b>%{x}</b><br>" + p + "<br>₹%{y:.2f} Cr<extra></extra>",
             ))
         fig_stack.update_layout(
             barmode="stack",
             legend=dict(orientation="h", y=1.1),
             margin=dict(t=10, b=10),
-            yaxis_title="₹",
+            yaxis_title="₹ Crores",
         )
         st.plotly_chart(fig_stack, use_container_width=True, key="ov_prin_stack")
 
     st.divider()
 
-    # ── Brand / Item drill-down ───────────────────────────────────────────────
+    # ── Brand / Item drill-down ────────────────────────────────────────────────
     view = st.radio("Drill down by", ["Brand", "Item"], horizontal=True)
     col_l, col_r = st.columns(2)
 
@@ -225,9 +251,10 @@ def render():
             SELECT b.BrandName AS label, SUM(i.TotalAmount) AS sales,
                    SUM(i.TotalBottleQty) AS bottles
             FROM TrVocItem i
-            JOIN TrVocHead h ON h.TransTypeID=i.TransTypeID AND h.VoucherNo=i.VoucherNo
+            JOIN TrVocHead h  ON h.TransTypeID=i.TransTypeID AND h.VoucherNo=i.VoucherNo
             JOIN MsTransType t ON t.id_key=h.TransTypeID
-            JOIN MsBrandMaster b ON b.BrandID=i.BrandID
+            JOIN MsItemMaster m  ON m.ItemID  = i.ItemID
+            JOIN MsBrandMaster b ON b.BrandID = m.BrandID
             WHERE t.ShortName='MS' {NOT_CANCELLED} {NOT_FREE}
               {date_filter}
             GROUP BY b.BrandName ORDER BY sales DESC
@@ -251,9 +278,9 @@ def render():
             SELECT TOP 20 m.ItemDescription AS label,
                    SUM(i.TotalAmount) AS sales, SUM(i.TotalBottleQty) AS bottles
             FROM TrVocItem i
-            JOIN TrVocHead h ON h.TransTypeID=i.TransTypeID AND h.VoucherNo=i.VoucherNo
+            JOIN TrVocHead h  ON h.TransTypeID=i.TransTypeID AND h.VoucherNo=i.VoucherNo
             JOIN MsTransType t ON t.id_key=h.TransTypeID
-            JOIN MsItemMaster m ON m.ItemID=i.ItemID
+            JOIN MsItemMaster m ON m.ItemID = i.ItemID
             WHERE t.ShortName='MS' {NOT_CANCELLED} {NOT_FREE}
               {date_filter}
             GROUP BY m.ItemDescription ORDER BY sales DESC
@@ -274,9 +301,7 @@ def render():
 
     st.divider()
 
-    # ── Top 10 Customers ─────────────────────────────────────────────────────
-    # Aggregate to invoice level first, then join party — avoids TrVocItem×TrVocDetail
-    # cartesian product inflation.
+    # ── Top 10 Customers ──────────────────────────────────────────────────────
     st.subheader("Top 10 Customers by Sales")
     df_cust = query(f"""
         SELECT TOP 10 p.PartyName AS customer,
@@ -285,7 +310,7 @@ def render():
         FROM (
             SELECT h.TransTypeID, h.VoucherNo, SUM(i.TotalAmount) AS inv_total
             FROM TrVocHead h
-            JOIN TrVocItem i ON i.TransTypeID=h.TransTypeID AND i.VoucherNo=h.VoucherNo
+            JOIN TrVocItem i  ON i.TransTypeID=h.TransTypeID AND i.VoucherNo=h.VoucherNo
             JOIN MsTransType t ON t.id_key=h.TransTypeID
             WHERE t.ShortName='MS' {NOT_CANCELLED} {NOT_FREE}
               {date_filter}
@@ -293,7 +318,7 @@ def render():
         ) v
         JOIN TrVocDetail d ON d.TransTypeID=v.TransTypeID AND d.VoucherNo=v.VoucherNo
         JOIN MsPartyMaster p ON p.PartyID=d.PartyID
-        WHERE d.DrCrIndicator='D' AND d.PartyID IS NOT NULL
+        WHERE d.DrCrIndicator='D' AND LEFT(d.PartyID, 1) = 'D'
         GROUP BY p.PartyName ORDER BY sales DESC
     """)
     if not df_cust.empty:

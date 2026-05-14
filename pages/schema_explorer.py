@@ -618,6 +618,71 @@ def render():
                 WHERE op.PartyID LIKE 'D%%' AND op.CloseBal > 0
                 ORDER BY op.CloseBal DESC
             """),
+            ("AA — Sales total FY25-26 via TrVocDetail (CR to blank party): target 443.39 Cr", """
+                SELECT
+                    SUM(d.Amount) AS total_sales_detail,
+                    COUNT(DISTINCT CAST(h.TransTypeID AS VARCHAR)+'|'+h.VoucherNo) AS vouchers
+                FROM TrVocDetail d
+                JOIN TrVocHead h ON h.TransTypeID=d.TransTypeID AND h.VoucherNo=d.VoucherNo
+                JOIN MsTransType t ON t.id_key=h.TransTypeID
+                WHERE t.ShortName='MS'
+                  AND d.DrCrIndicator='C'
+                  AND (d.PartyID IS NULL OR LTRIM(RTRIM(d.PartyID)) = '')
+                  AND ISNULL(h.Cancelled,'N') <> 'Y'
+                  AND h.VoucherDate >= '2025-04-01'
+                  AND h.VoucherDate <  '2026-04-01'
+            """),
+            ("AA2 — Sales by MS TransType FY25-26 via TrVocDetail CR to blank party", """
+                SELECT t.TransTypeName, t.TransTypeID,
+                    COUNT(DISTINCT CAST(h.TransTypeID AS VARCHAR)+'|'+h.VoucherNo) AS vouchers,
+                    SUM(d.Amount) AS sales_amount
+                FROM TrVocDetail d
+                JOIN TrVocHead h ON h.TransTypeID=d.TransTypeID AND h.VoucherNo=d.VoucherNo
+                JOIN MsTransType t ON t.id_key=h.TransTypeID
+                WHERE t.ShortName='MS'
+                  AND d.DrCrIndicator='C'
+                  AND (d.PartyID IS NULL OR LTRIM(RTRIM(d.PartyID)) = '')
+                  AND ISNULL(h.Cancelled,'N') <> 'Y'
+                  AND h.VoucherDate >= '2025-04-01'
+                  AND h.VoucherDate <  '2026-04-01'
+                GROUP BY t.TransTypeName, t.TransTypeID
+                ORDER BY sales_amount DESC
+            """),
+            ("AB — TrVocItem.BrandID vs MsItemMaster.BrandID: are they the same?", """
+                SELECT TOP 20
+                    i.ItemID,
+                    i.BrandID AS item_BrandID,
+                    m.BrandID AS master_BrandID,
+                    CASE WHEN i.BrandID = m.BrandID THEN 'SAME' ELSE 'DIFFERENT' END AS match,
+                    b.BrandName
+                FROM TrVocItem i
+                JOIN TrVocHead h ON h.TransTypeID=i.TransTypeID AND h.VoucherNo=i.VoucherNo
+                JOIN MsTransType t ON t.id_key=h.TransTypeID
+                JOIN MsItemMaster m ON m.ItemID = i.ItemID
+                LEFT JOIN MsBrandMaster b ON b.BrandID = m.BrandID
+                WHERE t.ShortName='MS'
+                  AND ISNULL(h.Cancelled,'N') <> 'Y'
+                  AND h.VoucherDate >= '2025-04-01'
+                  AND h.VoucherDate <  '2026-04-01'
+            """),
+            ("AC — Top 15 brands by sales FY25-26 via MsItemMaster join (verify principal mapping)", """
+                SELECT TOP 15
+                    b.BrandName, b.BrandID,
+                    SUM(i.TotalAmount) AS sales,
+                    SUM(i.TotalBottleQty) AS bottles
+                FROM TrVocItem i
+                JOIN TrVocHead h ON h.TransTypeID=i.TransTypeID AND h.VoucherNo=i.VoucherNo
+                JOIN MsTransType t ON t.id_key=h.TransTypeID
+                JOIN MsItemMaster m ON m.ItemID = i.ItemID
+                JOIN MsBrandMaster b ON b.BrandID = m.BrandID
+                WHERE t.ShortName='MS'
+                  AND ISNULL(h.Cancelled,'N') <> 'Y'
+                  AND ISNULL(i.FreeItemYN,'N') <> 'Y'
+                  AND h.VoucherDate >= '2025-04-01'
+                  AND h.VoucherDate <  '2026-04-01'
+                GROUP BY b.BrandName, b.BrandID
+                ORDER BY sales DESC
+            """),
             ]
 
             import io, zipfile
