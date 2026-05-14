@@ -2,7 +2,7 @@ import streamlit as st
 import pandas as pd
 from db import query
 from config import NOT_CANCELLED, NOT_FREE, COLORS
-from utils import fmt_inr, month_col
+from utils import fmt_inr, month_col, scale_cr
 from components.kpi_cards import kpi_row
 from components.charts import bar_chart, grouped_bar, pie_chart, area_chart
 
@@ -15,23 +15,24 @@ def render():
     date_filter = st.session_state.get("date_filter", "")
 
     st.info(
-        "Collections = amount collected from customer invoices raised in the selected period "
-        "(derived from invoice balances in the ERP). Payments = Bank Payment + Cash Payment vouchers.",
+        "Collections = Bank Receipts (BR) + Cash Receipts (CR) credited to customer accounts. "
+        "Payments = Bank Payment (BP) + Cash Payment (CE) vouchers, debit side.",
         icon="ℹ️"
     )
 
     # ── KPIs ─────────────────────────────────────────────────────────────────
-    # Collections = ALL credits to customer (D%) ledger accounts in the period
-    # This includes BR, BP, CE, MS credit notes — whatever credits the customer account
+    # Collections = BR+CR transaction types only — cash/bank receipts from D% customers
     kpi_coll = query(f"""
         SELECT
             SUM(d.Amount) AS total_collections,
             COUNT(DISTINCT CAST(h.TransTypeID AS VARCHAR)+'|'+h.VoucherNo) AS receipt_vouchers
         FROM TrVocDetail d
         JOIN TrVocHead h  ON h.TransTypeID=d.TransTypeID AND h.VoucherNo=d.VoucherNo
-        WHERE ISNULL(h.Cancelled,'N') <> 'Y'
+        JOIN MsTransType t ON t.id_key=h.TransTypeID
+        WHERE t.ShortName IN ('BR','CR')
+          AND ISNULL(h.Cancelled,'N') <> 'Y'
           AND d.DrCrIndicator='C'
-          AND d.PartyID LIKE 'D%'
+          AND LEFT(d.PartyID,1)='D'
           {date_filter}
     """)
     kpi_pay = query(f"""
@@ -63,8 +64,10 @@ def render():
                SUM(d.Amount) AS collections
         FROM TrVocDetail d
         JOIN TrVocHead h  ON h.TransTypeID=d.TransTypeID AND h.VoucherNo=d.VoucherNo
-        WHERE ISNULL(h.Cancelled,'N') <> 'Y'
-          AND d.DrCrIndicator='C' AND d.PartyID LIKE 'D%'
+        JOIN MsTransType t ON t.id_key=h.TransTypeID
+        WHERE t.ShortName IN ('BR','CR')
+          AND ISNULL(h.Cancelled,'N') <> 'Y'
+          AND d.DrCrIndicator='C' AND LEFT(d.PartyID,1)='D'
           {date_filter}
         GROUP BY YEAR(h.VoucherDate), MONTH(h.VoucherDate)
         ORDER BY yr, mo
@@ -91,18 +94,20 @@ def render():
             df_cf = df_coll_m.copy()
             df_cf["payments"] = 0
         df_cf["net"] = df_cf["collections"] - df_cf["payments"]
+        df_cf = scale_cr(df_cf, "collections", "payments", "net")
         st.plotly_chart(
             grouped_bar(df_cf, x="month", series=[
                 {"col": "collections", "name": "Collections", "color": COLORS["collection"]},
                 {"col": "payments",    "name": "Payments",    "color": COLORS["purchase"]},
-            ]),
+            ], yaxis_title="₹ Crores"),
             use_container_width=True, key="cf_monthly"
         )
         st.subheader("Net Monthly Cash Flow")
         st.plotly_chart(
             area_chart(df_cf, x="month",
                        y_cols=[{"col": "net", "name": "Net Cash Flow",
-                                "color": COLORS["info"]}]),
+                                "color": COLORS["info"]}],
+                       yaxis_title="₹ Crores"),
             use_container_width=True, key="cf_net_area"
         )
 
@@ -117,16 +122,20 @@ def render():
                    SUM(d.Amount) AS collections
             FROM TrVocDetail d
             JOIN TrVocHead h  ON h.TransTypeID=d.TransTypeID AND h.VoucherNo=d.VoucherNo
+            JOIN MsTransType t ON t.id_key=h.TransTypeID
             JOIN MsPartyMaster p ON p.PartyID=d.PartyID
-            WHERE ISNULL(h.Cancelled,'N') <> 'Y'
-              AND d.DrCrIndicator='C' AND d.PartyID LIKE 'D%'
+            WHERE t.ShortName IN ('BR','CR')
+              AND ISNULL(h.Cancelled,'N') <> 'Y'
+              AND d.DrCrIndicator='C' AND LEFT(d.PartyID,1)='D'
               {date_filter}
             GROUP BY p.PartyName
             ORDER BY collections DESC
         """)
         if not df_cust_coll.empty:
+            df_cust_coll = scale_cr(df_cust_coll, "collections")
             st.plotly_chart(bar_chart(df_cust_coll, x="customer", y="collections",
-                                      orientation="h", color_scale="Greens"),
+                                      orientation="h", color_scale="Greens",
+                                      yaxis_title="₹ Crores"),
                             use_container_width=True, key="cf_cust_coll")
 
     with col_r:
@@ -167,8 +176,10 @@ def render():
                SUM(d.Amount) AS collected
         FROM TrVocDetail d
         JOIN TrVocHead h ON h.TransTypeID=d.TransTypeID AND h.VoucherNo=d.VoucherNo
-        WHERE ISNULL(h.Cancelled,'N') <> 'Y'
-          AND d.DrCrIndicator='C' AND d.PartyID LIKE 'D%' {_12m}
+        JOIN MsTransType t ON t.id_key=h.TransTypeID
+        WHERE t.ShortName IN ('BR','CR')
+          AND ISNULL(h.Cancelled,'N') <> 'Y'
+          AND d.DrCrIndicator='C' AND LEFT(d.PartyID,1)='D' {_12m}
         GROUP BY YEAR(h.VoucherDate), MONTH(h.VoucherDate)
     """)
     if not df_eff_s.empty:
@@ -178,10 +189,11 @@ def render():
             df_eff = df_eff_s.merge(df_eff_c[["month","collected"]], on="month", how="left").fillna(0)
         else:
             df_eff = df_eff_s.copy(); df_eff["collected"] = 0
+        df_eff_cr = scale_cr(df_eff, "sales", "collected")
         st.plotly_chart(
-            grouped_bar(df_eff, x="month", series=[
+            grouped_bar(df_eff_cr, x="month", series=[
                 {"col": "sales",     "name": "Sales",     "color": COLORS["sales"]},
                 {"col": "collected", "name": "Collected", "color": COLORS["collection"]},
-            ]),
+            ], yaxis_title="₹ Crores"),
             use_container_width=True, key="cf_efficiency"
         )

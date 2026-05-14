@@ -1,7 +1,7 @@
 import streamlit as st
 from db import query
-from config import NOT_CANCELLED, NOT_FREE, COLORS
-from utils import fmt_inr, fmt_qty, month_col
+from config import NOT_CANCELLED, NOT_FREE, COLORS, brand_case, PRINCIPAL_COLORS
+from utils import fmt_inr, fmt_qty, month_col, scale_cr
 from components.kpi_cards import kpi_row
 from components.charts import bar_chart, pie_chart
 
@@ -49,24 +49,29 @@ def render():
         """)
         if not df_m.empty:
             df_m = month_col(df_m)
+            df_m = scale_cr(df_m, 'sales')
             st.plotly_chart(bar_chart(df_m, x="month", y="sales",
-                                      color=COLORS["sales"]),
+                                      color=COLORS["sales"],
+                                      yaxis_title="₹ Crores"),
                             use_container_width=True, key="sl_monthly")
 
     with col_r:
-        st.subheader("Sales by Category")
-        df_cat = query(f"""
-            SELECT t.TransTypeName AS category, SUM(i.TotalAmount) AS sales
-            FROM TrVocHead h
-            JOIN TrVocItem i ON i.TransTypeID=h.TransTypeID AND i.VoucherNo=h.VoucherNo
-            JOIN MsTransType t ON t.id_key=h.TransTypeID
-            WHERE t.ShortName='MS' {NOT_CANCELLED} {NOT_FREE}
-              {date_filter}
-            GROUP BY t.TransTypeName ORDER BY sales DESC
+        st.subheader("Sales by Principal")
+        df_prin = query(f"""
+            SELECT principal, SUM(sales) AS sales FROM (
+                SELECT {brand_case("m")} AS principal, i.TotalAmount AS sales
+                FROM TrVocHead h
+                JOIN TrVocItem i ON i.TransTypeID=h.TransTypeID AND i.VoucherNo=h.VoucherNo
+                JOIN MsTransType t ON t.id_key=h.TransTypeID
+                JOIN MsItemMaster m ON m.ItemID=i.ItemID
+                WHERE t.ShortName='MS' {NOT_CANCELLED} {NOT_FREE} {date_filter}
+            ) t GROUP BY principal ORDER BY sales DESC
         """)
-        if not df_cat.empty:
-            st.plotly_chart(pie_chart(df_cat, "category", "sales"),
-                            use_container_width=True, key="sl_cat_pie")
+        if not df_prin.empty:
+            prin_colors = [PRINCIPAL_COLORS.get(p, '#6C757D') for p in df_prin["principal"]]
+            st.plotly_chart(pie_chart(df_prin, "principal", "sales",
+                                     colors=prin_colors),
+                            use_container_width=True, key="sl_prin_pie")
 
     # ── Daily last 30 days ────────────────────────────────────────────────────
     st.subheader("Daily Sales — Last 30 Days")
@@ -107,7 +112,7 @@ def render():
             ) v
             JOIN TrVocDetail d ON d.TransTypeID=v.TransTypeID AND d.VoucherNo=v.VoucherNo
             JOIN MsPartyMaster p ON p.PartyID=d.PartyID
-            WHERE d.DrCrIndicator='D' AND d.PartyID IS NOT NULL
+            WHERE d.DrCrIndicator='D' AND LEFT(d.PartyID,1)='D'
             GROUP BY p.PartyName ORDER BY sales DESC
         """)
         if not df_c.empty:

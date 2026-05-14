@@ -40,7 +40,7 @@ def render():
         FROM TrVocHead h
         JOIN TrVocItem i ON i.TransTypeID=h.TransTypeID AND i.VoucherNo=h.VoucherNo
         JOIN MsTransType t ON t.id_key=h.TransTypeID
-        WHERE t.ShortName='MS' {NOT_CANCELLED} {date_filter}
+        WHERE t.ShortName='MS' {NOT_CANCELLED} AND ISNULL(i.FreeItemYN,'N')<>'Y' {date_filter}
     """)
     # Active customers = distinct D% parties on DR side of real product invoices
     kpi_ar = query(f"""
@@ -316,7 +316,7 @@ def render():
         ) v
         JOIN TrVocDetail d ON d.TransTypeID=v.TransTypeID AND d.VoucherNo=v.VoucherNo
         JOIN MsPartyMaster p ON p.PartyID=d.PartyID
-        WHERE d.DrCrIndicator='D' AND LEFT(d.PartyID, 1) = 'D'
+        WHERE d.DrCrIndicator='D' AND LEFT(d.PartyID,1)='D'
         GROUP BY p.PartyName ORDER BY sales DESC
     """)
     if not df_cust.empty:

@@ -24,3 +24,11 @@ def month_col(df):
         df["yr"].astype(str) + "-" + df["mo"].astype(str) + "-01"
     )
     return df
+
+
+def scale_cr(df, *cols):
+    """Divide named columns by 1 Cr in-place (copy) for chart display."""
+    df = df.copy()
+    for c in cols:
+        df[c] = df[c] / 1_00_00_000
+    return df

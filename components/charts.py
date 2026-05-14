@@ -3,7 +3,7 @@ import plotly.graph_objects as go
 from config import COLORS
 
 
-def bar_chart(df, x, y, title="", color=None, orientation="v", color_scale=None):
+def bar_chart(df, x, y, title="", color=None, orientation="v", color_scale=None, yaxis_title=""):
     if orientation == "h":
         fig = px.bar(df, x=y, y=x, orientation="h",
                      labels={y: "", x: ""},
@@ -19,10 +19,12 @@ def bar_chart(df, x, y, title="", color=None, orientation="v", color_scale=None)
                      color_discrete_sequence=[color or COLORS["primary"]])
         fig.update_layout(xaxis_tickangle=-45, coloraxis_showscale=False)
     fig.update_layout(title=title, margin=dict(t=40 if title else 10, b=10))
+    if yaxis_title:
+        fig.update_layout(yaxis_title=yaxis_title)
     return fig
 
 
-def line_chart(df, x, y_cols: list[dict], title=""):
+def line_chart(df, x, y_cols: list[dict], title="", yaxis_title=""):
     """y_cols: [{"col": "sales", "name": "Sales", "color": "#hex"}]"""
     fig = go.Figure()
     for y in y_cols:
@@ -33,10 +35,12 @@ def line_chart(df, x, y_cols: list[dict], title=""):
         ))
     fig.update_layout(title=title, margin=dict(t=40 if title else 10, b=10),
                       legend=dict(orientation="h", y=1.1))
+    if yaxis_title:
+        fig.update_layout(yaxis_title=yaxis_title)
     return fig
 
 
-def grouped_bar(df, x, series: list[dict], title=""):
+def grouped_bar(df, x, series: list[dict], title="", yaxis_title=""):
     """series: [{"col": "sales", "name": "Sales", "color": "#hex"}]"""
     fig = go.Figure()
     for s in series:
@@ -48,6 +52,8 @@ def grouped_bar(df, x, series: list[dict], title=""):
                       margin=dict(t=40 if title else 10, b=10),
                       legend=dict(orientation="h", y=1.1),
                       yaxis_title="₹")
+    if yaxis_title:
+        fig.update_layout(yaxis_title=yaxis_title)
     return fig
 
 
@@ -58,7 +64,7 @@ def pie_chart(df, names, values, title="", colors=None):
     return fig
 
 
-def area_chart(df, x, y_cols: list[dict], title=""):
+def area_chart(df, x, y_cols: list[dict], title="", yaxis_title=""):
     fig = go.Figure()
     for y in y_cols:
         fig.add_trace(go.Scatter(
@@ -68,4 +74,6 @@ def area_chart(df, x, y_cols: list[dict], title=""):
         ))
     fig.update_layout(title=title, margin=dict(t=40 if title else 10, b=10),
                       legend=dict(orientation="h", y=1.1), yaxis_title="₹")
+    if yaxis_title:
+        fig.update_layout(yaxis_title=yaxis_title)
     return fig

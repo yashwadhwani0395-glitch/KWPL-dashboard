@@ -1,8 +1,8 @@
 import streamlit as st
 import pandas as pd
 from db import query
-from config import SALES_IN, PURCHASE_IN, NOT_CANCELLED, NOT_FREE, COLORS
-from utils import fmt_inr, fmt_qty, month_col
+from config import SALES_IN, PURCHASE_IN, PURCHASE_ALL_IN, NOT_CANCELLED, NOT_FREE, COLORS
+from utils import fmt_inr, fmt_qty, month_col, scale_cr
 from components.kpi_cards import kpi_row
 from components.charts import bar_chart, grouped_bar, pie_chart
 
@@ -29,12 +29,12 @@ def render():
     # ── Top-line summary ──────────────────────────────────────────────────────
     pl = query(f"""
         SELECT
-            SUM(CASE WHEN t.ShortName='MS'                 AND ISNULL(i.FreeItemYN,'N')<>'Y' THEN i.TotalAmount ELSE 0 END) AS revenue,
-            SUM(CASE WHEN h.TransTypeID IN ({PURCHASE_IN}) AND ISNULL(i.FreeItemYN,'N')<>'Y' THEN i.TotalAmount ELSE 0 END) AS cogs
+            SUM(CASE WHEN t.ShortName='MS'                      AND ISNULL(i.FreeItemYN,'N')<>'Y' THEN i.TotalAmount ELSE 0 END) AS revenue,
+            SUM(CASE WHEN h.TransTypeID IN ({PURCHASE_ALL_IN}) AND ISNULL(i.FreeItemYN,'N')<>'Y' THEN i.TotalAmount ELSE 0 END) AS cogs
         FROM TrVocHead h
         JOIN TrVocItem i ON i.TransTypeID=h.TransTypeID AND i.VoucherNo=h.VoucherNo
         JOIN MsTransType t ON t.id_key=h.TransTypeID
-        WHERE (t.ShortName='MS' OR h.TransTypeID IN ({PURCHASE_IN}))
+        WHERE (t.ShortName='MS' OR h.TransTypeID IN ({PURCHASE_ALL_IN}))
           {NOT_CANCELLED} {date_filter}
     """)
     # Receivables from MsPartyOpening — matches ERP debtor closing balance exactly
@@ -113,12 +113,12 @@ def render():
     df_trend = query(f"""
         SELECT
             YEAR(h.VoucherDate) AS yr, MONTH(h.VoucherDate) AS mo,
-            SUM(CASE WHEN t.ShortName='MS'                      THEN i.TotalAmount ELSE 0 END) AS revenue,
-            SUM(CASE WHEN h.TransTypeID IN ({PURCHASE_IN})      THEN i.TotalAmount ELSE 0 END) AS cogs
+            SUM(CASE WHEN t.ShortName='MS'                       THEN i.TotalAmount ELSE 0 END) AS revenue,
+            SUM(CASE WHEN h.TransTypeID IN ({PURCHASE_ALL_IN})  THEN i.TotalAmount ELSE 0 END) AS cogs
         FROM TrVocHead h
         JOIN TrVocItem i ON i.TransTypeID=h.TransTypeID AND i.VoucherNo=h.VoucherNo
         JOIN MsTransType t ON t.id_key=h.TransTypeID
-        WHERE (t.ShortName='MS' OR h.TransTypeID IN ({PURCHASE_IN}))
+        WHERE (t.ShortName='MS' OR h.TransTypeID IN ({PURCHASE_ALL_IN}))
           {NOT_CANCELLED} AND ISNULL(i.FreeItemYN,'N') <> 'Y'
           {date_filter}
         GROUP BY YEAR(h.VoucherDate), MONTH(h.VoucherDate)
@@ -127,11 +127,12 @@ def render():
     if not df_trend.empty:
         df_trend = month_col(df_trend)
         df_trend["gross_profit"] = df_trend["revenue"] - df_trend["cogs"]
+        df_trend = scale_cr(df_trend, "revenue", "cogs", "gross_profit")
         fig = grouped_bar(df_trend, x="month", series=[
             {"col": "revenue",       "name": "Revenue",       "color": COLORS["sales"]},
             {"col": "cogs",          "name": "Cost of Goods", "color": COLORS["purchase"]},
             {"col": "gross_profit",  "name": "Gross Profit",  "color": COLORS["collection"]},
-        ])
+        ], yaxis_title="₹ Crores")
         st.plotly_chart(fig, use_container_width=True, key="bs_monthly_pl")
 
     st.divider()
@@ -181,15 +182,19 @@ def render():
     col_l, col_r = st.columns(2)
     with col_l:
         if not df_rec.empty:
+            df_rec = scale_cr(df_rec, "receivable")
             st.plotly_chart(bar_chart(df_rec, x="party", y="receivable",
                                       orientation="h",
                                       color_scale="Purples",
-                                      title="Top Receivables"),
+                                      title="Top Receivables",
+                                      yaxis_title="₹ Crores"),
                             use_container_width=True, key="bs_recv")
     with col_r:
         if not df_pay.empty:
+            df_pay = scale_cr(df_pay, "payable")
             st.plotly_chart(bar_chart(df_pay, x="party", y="payable",
                                       orientation="h",
                                       color_scale="Reds",
-                                      title="Top Payables"),
+                                      title="Top Payables",
+                                      yaxis_title="₹ Crores"),
                             use_container_width=True, key="bs_pay")

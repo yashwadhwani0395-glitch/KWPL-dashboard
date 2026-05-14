@@ -2,7 +2,7 @@ import streamlit as st
 import pandas as pd
 from db import query
 from config import SALES_IN, NOT_CANCELLED, COLORS
-from utils import fmt_inr, fmt_qty
+from utils import fmt_inr, fmt_qty, scale_cr
 from components.kpi_cards import kpi_row
 from components.charts import bar_chart, pie_chart
 
@@ -49,7 +49,7 @@ def render():
         JOIN MsPartyMaster p ON p.PartyID=d.PartyID
         WHERE t.ShortName='MS' {NOT_CANCELLED}
           AND d.DrCrIndicator='D' AND d.RemainingAmt > 0
-          AND d.PartyID IS NOT NULL
+          AND LEFT(d.PartyID,1)='D'
           {date_filter}
         GROUP BY p.PartyName ORDER BY total DESC
     """)
@@ -66,11 +66,14 @@ def render():
         df_buckets = pd.DataFrame({"bucket": list(buckets.keys()),
                                    "amount": list(buckets.values())})
 
+        df_buckets["amount_cr"] = df_buckets["amount"] / 1_00_00_000
+
         col_l, col_r = st.columns(2)
         with col_l:
-            st.plotly_chart(bar_chart(df_buckets, x="bucket", y="amount",
+            st.plotly_chart(bar_chart(df_buckets, x="bucket", y="amount_cr",
                                       color=COLORS["warning"],
-                                      title="Outstanding by Age Bucket"),
+                                      title="Outstanding by Age Bucket",
+                                      yaxis_title="₹ Crores"),
                             use_container_width=True, key="da_buckets")
         with col_r:
             st.plotly_chart(pie_chart(df_buckets, "bucket", "amount",
@@ -89,8 +92,10 @@ def render():
             ORDER BY op.{bal_col} DESC
         """)
         if not df_top20.empty:
-            st.plotly_chart(bar_chart(df_top20, x="customer", y="outstanding",
-                                      orientation="h", color_scale="Reds"),
+            df_top20["outstanding_cr"] = df_top20["outstanding"] / 1_00_00_000
+            st.plotly_chart(bar_chart(df_top20, x="customer", y="outstanding_cr",
+                                      orientation="h", color_scale="Reds",
+                                      yaxis_title="₹ Crores"),
                             use_container_width=True, key="da_top_debtors")
 
         st.divider()
@@ -135,8 +140,10 @@ def render():
         GROUP BY s.FullName ORDER BY outstanding DESC
     """)
     if not df_sm.empty:
-        st.plotly_chart(bar_chart(df_sm, x="salesman", y="outstanding",
-                                  color_scale="Oranges"),
+        df_sm["outstanding_cr"] = df_sm["outstanding"] / 1_00_00_000
+        st.plotly_chart(bar_chart(df_sm, x="salesman", y="outstanding_cr",
+                                  color_scale="Oranges",
+                                  yaxis_title="₹ Crores"),
                         use_container_width=True, key="da_salesman")
         df_sm_disp = df_sm.copy()
         df_sm_disp["outstanding"] = df_sm_disp["outstanding"].apply(fmt_inr)

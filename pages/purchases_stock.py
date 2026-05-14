@@ -1,7 +1,7 @@
 import streamlit as st
 from db import query
-from config import PURCHASE_IN, SALES_IN, NOT_CANCELLED, NOT_FREE, COLORS
-from utils import fmt_inr, fmt_qty, month_col
+from config import PURCHASE_IN, PURCHASE_ALL_IN, SALES_IN, NOT_CANCELLED, NOT_FREE, COLORS
+from utils import fmt_inr, fmt_qty, month_col, scale_cr
 from components.kpi_cards import kpi_row
 from components.charts import bar_chart, pie_chart, grouped_bar
 
@@ -20,6 +20,13 @@ def render():
         FROM TrVocHead h
         JOIN TrVocItem i ON i.TransTypeID=h.TransTypeID AND i.VoucherNo=h.VoucherNo
         WHERE h.TransTypeID IN ({PURCHASE_IN}) {NOT_CANCELLED} {NOT_FREE}
+          {date_filter}
+    """)
+    pur_total = query(f"""
+        SELECT SUM(i.TotalAmount) AS total_purchases
+        FROM TrVocHead h
+        JOIN TrVocItem i ON i.TransTypeID=h.TransTypeID AND i.VoucherNo=h.VoucherNo
+        WHERE h.TransTypeID IN ({PURCHASE_ALL_IN}) {NOT_CANCELLED} {NOT_FREE}
           {date_filter}
     """)
     # Stock is always current (no date filter)
@@ -42,11 +49,12 @@ def render():
         WHERE sub.net_bottles > 0
     """)
     kpi_row([
-        {"label": "Purchase Invoices", "value": pur["invoices"][0],         "fmt": "qty"},
-        {"label": "Total Purchases",   "value": pur["purchases"][0],        "fmt": "inr"},
-        {"label": "Bottles Purchased", "value": pur["bottles"][0],          "fmt": "qty"},
-        {"label": "Stock (MRP Value)", "value": stock["stock_mrp"][0],      "fmt": "inr"},
-        {"label": "Stock (Bottles)",   "value": stock["total_bottles"][0],  "fmt": "qty"},
+        {"label": "Purchase Invoices",          "value": pur["invoices"][0],                   "fmt": "qty"},
+        {"label": "Company Invoices (PU)",       "value": pur["purchases"][0],                  "fmt": "inr"},
+        {"label": "Total Purchases (+ Excise)",  "value": pur_total["total_purchases"][0],      "fmt": "inr"},
+        {"label": "Bottles Purchased",           "value": pur["bottles"][0],                    "fmt": "qty"},
+        {"label": "Stock (MRP Value)",           "value": stock["stock_mrp"][0],                "fmt": "inr"},
+        {"label": "Stock (Bottles)",             "value": stock["total_bottles"][0],            "fmt": "qty"},
     ])
 
     st.divider()
@@ -61,14 +69,16 @@ def render():
                    SUM(i.TotalAmount) AS purchases
             FROM TrVocHead h
             JOIN TrVocItem i ON i.TransTypeID=h.TransTypeID AND i.VoucherNo=h.VoucherNo
-            WHERE h.TransTypeID IN ({PURCHASE_IN}) {NOT_CANCELLED} {NOT_FREE}
+            WHERE h.TransTypeID IN ({PURCHASE_ALL_IN}) {NOT_CANCELLED} {NOT_FREE}
               {date_filter}
             GROUP BY YEAR(h.VoucherDate), MONTH(h.VoucherDate) ORDER BY yr, mo
         """)
         if not df_m.empty:
             df_m = month_col(df_m)
+            df_m = scale_cr(df_m, 'purchases')
             st.plotly_chart(bar_chart(df_m, x="month", y="purchases",
-                                      color=COLORS["purchase"]),
+                                      color=COLORS["purchase"],
+                                      yaxis_title="₹ Crores"),
                             use_container_width=True, key="ps_monthly")
 
     with col_r:
@@ -108,7 +118,7 @@ def render():
         ) v
         JOIN TrVocDetail d ON d.TransTypeID=v.TransTypeID AND d.VoucherNo=v.VoucherNo
         JOIN MsPartyMaster p ON p.PartyID=d.PartyID
-        WHERE d.DrCrIndicator='C' AND d.PartyID IS NOT NULL
+        WHERE d.DrCrIndicator='C' AND LEFT(d.PartyID,1)='C'
         GROUP BY p.PartyName ORDER BY purchases DESC
     """)
     if not df_sup.empty:
@@ -124,7 +134,8 @@ def render():
         SELECT b.BrandName AS brand, SUM(i.TotalBottleQty) AS purchased
         FROM TrVocItem i
         JOIN TrVocHead h ON h.TransTypeID=i.TransTypeID AND h.VoucherNo=i.VoucherNo
-        JOIN MsBrandMaster b ON b.BrandID=i.BrandID
+        JOIN MsItemMaster m ON m.ItemID=i.ItemID
+        JOIN MsBrandMaster b ON b.BrandID=m.BrandID
         WHERE h.TransTypeID IN ({PURCHASE_IN}) {NOT_CANCELLED} {NOT_FREE}
           {date_filter}
         GROUP BY b.BrandName ORDER BY purchased DESC
@@ -137,7 +148,8 @@ def render():
                         ELSE -vi.TotalBottleQty END) AS stock_bottles
         FROM TrVocItem vi
         JOIN TrVocHead h ON h.TransTypeID=vi.TransTypeID AND h.VoucherNo=vi.VoucherNo
-        JOIN MsBrandMaster b ON b.BrandID=vi.BrandID
+        JOIN MsItemMaster m ON m.ItemID=vi.ItemID
+        JOIN MsBrandMaster b ON b.BrandID=m.BrandID
         WHERE h.TransTypeID IN ({PURCHASE_IN},{SALES_IN})
           {NOT_CANCELLED} AND ISNULL(vi.FreeItemYN,'N') <> 'Y'
         GROUP BY b.BrandName
@@ -172,12 +184,12 @@ def render():
                         THEN vi.TotalBottleQty
                         ELSE -vi.TotalBottleQty END) AS bottles,
                SUM(CASE WHEN h.TransTypeID IN ({PURCHASE_IN})
-                        THEN vi.TotalBottleQty * m.MrpBottRate
-                        ELSE -vi.TotalBottleQty * m.MrpBottRate END) AS mrp_value
+                        THEN vi.TotalBottleQty * m2.MrpBottRate
+                        ELSE -vi.TotalBottleQty * m2.MrpBottRate END) AS mrp_value
         FROM TrVocItem vi
         JOIN TrVocHead h ON h.TransTypeID=vi.TransTypeID AND h.VoucherNo=vi.VoucherNo
-        JOIN MsItemMaster m ON m.ItemID=vi.ItemID
-        JOIN MsBrandMaster b ON b.BrandID=vi.BrandID
+        JOIN MsItemMaster m2 ON m2.ItemID=vi.ItemID
+        JOIN MsBrandMaster b ON b.BrandID=m2.BrandID
         WHERE h.TransTypeID IN ({PURCHASE_IN},{SALES_IN})
           {NOT_CANCELLED} AND ISNULL(vi.FreeItemYN,'N') <> 'Y'
         GROUP BY b.BrandName
