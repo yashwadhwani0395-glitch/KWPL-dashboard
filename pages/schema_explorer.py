@@ -976,6 +976,213 @@ def render():
                   AND h.VoucherDate >= '2025-04-01'
                   AND h.VoucherDate <  '2026-04-01'
             """),
+            ("AW — ALL MsTransType rows where ShortName=PU (complete purchase type list)", """
+                SELECT id_key, ShortName, TransTypeName
+                FROM MsTransType
+                WHERE ShortName='PU'
+                ORDER BY id_key
+            """),
+            ("AX — PU TransTypeIDs in config vs TrVocItem FY25-26: per-type breakdown", """
+                SELECT
+                    t.id_key AS TransTypeID,
+                    t.TransTypeName,
+                    COUNT(DISTINCT CAST(h.TransTypeID AS VARCHAR)+'|'+h.VoucherNo) AS vouchers,
+                    SUM(i.TotalAmount)     AS total_amount,
+                    SUM(i.TotalBottleQty)  AS total_bottles,
+                    SUM(i.CaseQty)         AS total_cases
+                FROM TrVocHead h
+                JOIN TrVocItem i    ON i.TransTypeID=h.TransTypeID AND i.VoucherNo=h.VoucherNo
+                JOIN MsTransType t  ON t.id_key=h.TransTypeID
+                WHERE t.ShortName='PU'
+                  AND ISNULL(h.Cancelled,'N') <> 'Y'
+                  AND ISNULL(i.FreeItemYN,'N') <> 'Y'
+                  AND h.VoucherDate >= '2025-04-01'
+                  AND h.VoucherDate <  '2026-04-01'
+                GROUP BY t.id_key, t.TransTypeName
+                ORDER BY total_amount DESC
+            """),
+            ("AY — PU total via TrVocItem FY25-26 (all PU types combined)", """
+                SELECT
+                    SUM(i.TotalAmount)    AS total_purchases_fy25,
+                    SUM(i.TotalBottleQty) AS total_bottles,
+                    COUNT(DISTINCT CAST(h.TransTypeID AS VARCHAR)+'|'+h.VoucherNo) AS vouchers
+                FROM TrVocHead h
+                JOIN TrVocItem i   ON i.TransTypeID=h.TransTypeID AND i.VoucherNo=h.VoucherNo
+                JOIN MsTransType t ON t.id_key=h.TransTypeID
+                WHERE t.ShortName='PU'
+                  AND ISNULL(h.Cancelled,'N') <> 'Y'
+                  AND ISNULL(i.FreeItemYN,'N') <> 'Y'
+                  AND h.VoucherDate >= '2025-04-01'
+                  AND h.VoucherDate <  '2026-04-01'
+            """),
+            ("AZ — LD (Load/Load Demo) via TrVocItem FY25-26: do they have product lines?", """
+                SELECT
+                    t.TransTypeName,
+                    COUNT(DISTINCT CAST(h.TransTypeID AS VARCHAR)+'|'+h.VoucherNo) AS vouchers,
+                    SUM(i.TotalAmount)    AS total_amount,
+                    SUM(i.TotalBottleQty) AS total_bottles
+                FROM TrVocHead h
+                JOIN TrVocItem i   ON i.TransTypeID=h.TransTypeID AND i.VoucherNo=h.VoucherNo
+                JOIN MsTransType t ON t.id_key=h.TransTypeID
+                WHERE t.ShortName='LD'
+                  AND ISNULL(h.Cancelled,'N') <> 'Y'
+                  AND h.VoucherDate >= '2025-04-01'
+                  AND h.VoucherDate <  '2026-04-01'
+                GROUP BY t.TransTypeName
+            """),
+            ("BA — S00xxx items in MS TrVocItem FY25-26: are any negative (= discounts)?", """
+                SELECT
+                    i.ItemID,
+                    COUNT(*) AS line_count,
+                    SUM(i.TotalAmount) AS total_amount,
+                    SUM(i.TotalBottleQty) AS total_bottles,
+                    MIN(i.TotalAmount) AS min_amount,
+                    MAX(i.TotalAmount) AS max_amount
+                FROM TrVocItem i
+                JOIN TrVocHead h ON h.TransTypeID=i.TransTypeID AND h.VoucherNo=i.VoucherNo
+                JOIN MsTransType t ON t.id_key=h.TransTypeID
+                WHERE t.ShortName='MS'
+                  AND ISNULL(h.Cancelled,'N') <> 'Y'
+                  AND i.ItemID LIKE 'S%'
+                  AND h.VoucherDate >= '2025-04-01'
+                  AND h.VoucherDate <  '2026-04-01'
+                GROUP BY i.ItemID
+                ORDER BY total_amount ASC
+            """),
+            ("BB — MsItemMaster columns (to check if S00xxx items are in ItemMaster)", """
+                SELECT COLUMN_NAME, DATA_TYPE, CHARACTER_MAXIMUM_LENGTH
+                FROM INFORMATION_SCHEMA.COLUMNS
+                WHERE TABLE_NAME='MsItemMaster'
+                ORDER BY ORDINAL_POSITION
+            """),
+            ("BC — MsServiceItemMaster sample rows (S00xxx service items)", """
+                SELECT TOP 20 * FROM MsServiceItemMaster ORDER BY 1
+            """),
+            ("BD — SA (Breakages) via TrVocItem FY25-26", """
+                SELECT
+                    t.TransTypeName,
+                    COUNT(DISTINCT CAST(h.TransTypeID AS VARCHAR)+'|'+h.VoucherNo) AS vouchers,
+                    SUM(i.TotalAmount)    AS total_amount,
+                    SUM(i.TotalBottleQty) AS total_bottles
+                FROM TrVocHead h
+                JOIN TrVocItem i   ON i.TransTypeID=h.TransTypeID AND i.VoucherNo=h.VoucherNo
+                JOIN MsTransType t ON t.id_key=h.TransTypeID
+                WHERE t.ShortName='SA'
+                  AND ISNULL(h.Cancelled,'N') <> 'Y'
+                  AND h.VoucherDate >= '2025-04-01'
+                  AND h.VoucherDate <  '2026-04-01'
+                GROUP BY t.TransTypeName
+            """),
+            ("BE — ALL ShortNames in MsTransType with TrVocItem totals FY25-26", """
+                SELECT
+                    t.ShortName,
+                    t.TransTypeName,
+                    t.id_key AS TransTypeID,
+                    COUNT(DISTINCT CAST(h.TransTypeID AS VARCHAR)+'|'+h.VoucherNo) AS vouchers,
+                    SUM(i.TotalAmount) AS total_amount,
+                    SUM(i.TotalBottleQty) AS total_bottles
+                FROM TrVocHead h
+                JOIN TrVocItem i   ON i.TransTypeID=h.TransTypeID AND i.VoucherNo=h.VoucherNo
+                JOIN MsTransType t ON t.id_key=h.TransTypeID
+                WHERE ISNULL(h.Cancelled,'N') <> 'Y'
+                  AND ISNULL(i.FreeItemYN,'N') <> 'Y'
+                  AND h.VoucherDate >= '2025-04-01'
+                  AND h.VoucherDate <  '2026-04-01'
+                GROUP BY t.ShortName, t.TransTypeName, t.id_key
+                ORDER BY t.ShortName, total_amount DESC
+            """),
+            ("BF — TransTypeID 51 (SALE JD IMPORTED): items that DO NOT join MsItemMaster", """
+                SELECT TOP 20
+                    i.ItemID,
+                    COUNT(*) AS line_count,
+                    SUM(i.TotalAmount) AS total_amount,
+                    SUM(i.TotalBottleQty) AS total_bottles
+                FROM TrVocItem i
+                JOIN TrVocHead h ON h.TransTypeID=i.TransTypeID AND h.VoucherNo=i.VoucherNo
+                WHERE i.TransTypeID=51
+                  AND ISNULL(h.Cancelled,'N') <> 'Y'
+                  AND ISNULL(i.FreeItemYN,'N') <> 'Y'
+                  AND h.VoucherDate >= '2025-04-01'
+                  AND h.VoucherDate <  '2026-04-01'
+                  AND NOT EXISTS (SELECT 1 FROM MsItemMaster m WHERE m.ItemID=i.ItemID)
+                GROUP BY i.ItemID
+                ORDER BY total_amount DESC
+            """),
+            ("BG — TransTypeID 51 (SALE JD IMPORTED): top brands via MsItemMaster join", """
+                SELECT TOP 20
+                    m.BrandID,
+                    b.BrandName,
+                    COUNT(*) AS line_count,
+                    SUM(i.TotalAmount) AS total_amount,
+                    SUM(i.TotalBottleQty) AS total_bottles
+                FROM TrVocItem i
+                JOIN TrVocHead h ON h.TransTypeID=i.TransTypeID AND h.VoucherNo=i.VoucherNo
+                JOIN MsItemMaster m ON m.ItemID=i.ItemID
+                LEFT JOIN MsBrandMaster b ON b.BrandID=m.BrandID
+                WHERE i.TransTypeID=51
+                  AND ISNULL(h.Cancelled,'N') <> 'Y'
+                  AND ISNULL(i.FreeItemYN,'N') <> 'Y'
+                  AND h.VoucherDate >= '2025-04-01'
+                  AND h.VoucherDate <  '2026-04-01'
+                GROUP BY m.BrandID, b.BrandName
+                ORDER BY total_amount DESC
+            """),
+            ("BH — TransTypeID 20 (MS44 DIAGEO NEW MRP): top brands via MsItemMaster join", """
+                SELECT TOP 20
+                    m.BrandID,
+                    b.BrandName,
+                    COUNT(*) AS line_count,
+                    SUM(i.TotalAmount) AS total_amount,
+                    SUM(i.TotalBottleQty) AS total_bottles
+                FROM TrVocItem i
+                JOIN TrVocHead h ON h.TransTypeID=i.TransTypeID AND h.VoucherNo=i.VoucherNo
+                JOIN MsItemMaster m ON m.ItemID=i.ItemID
+                LEFT JOIN MsBrandMaster b ON b.BrandID=m.BrandID
+                WHERE i.TransTypeID=20
+                  AND ISNULL(h.Cancelled,'N') <> 'Y'
+                  AND ISNULL(i.FreeItemYN,'N') <> 'Y'
+                  AND h.VoucherDate >= '2025-04-01'
+                  AND h.VoucherDate <  '2026-04-01'
+                GROUP BY m.BrandID, b.BrandName
+                ORDER BY total_amount DESC
+            """),
+            ("BI — ALL MS TransTypeIDs: items without MsItemMaster match (total dropped)", """
+                SELECT
+                    h.TransTypeID,
+                    t.TransTypeName,
+                    COUNT(*) AS dropped_lines,
+                    SUM(i.TotalAmount) AS dropped_amount
+                FROM TrVocItem i
+                JOIN TrVocHead h ON h.TransTypeID=i.TransTypeID AND h.VoucherNo=h.VoucherNo
+                JOIN MsTransType t ON t.id_key=h.TransTypeID
+                WHERE t.ShortName='MS'
+                  AND ISNULL(h.Cancelled,'N') <> 'Y'
+                  AND ISNULL(i.FreeItemYN,'N') <> 'Y'
+                  AND h.VoucherDate >= '2025-04-01'
+                  AND h.VoucherDate <  '2026-04-01'
+                  AND NOT EXISTS (SELECT 1 FROM MsItemMaster m WHERE m.ItemID=i.ItemID)
+                GROUP BY h.TransTypeID, t.TransTypeName
+                ORDER BY dropped_amount DESC
+            """),
+            ("BJ — Top 40 brands by sales FY25-26 (extend top-15 to catch Diageo/BF)", """
+                SELECT TOP 40
+                    m.BrandID,
+                    b.BrandName,
+                    SUM(i.TotalAmount) AS sales,
+                    SUM(i.TotalBottleQty) AS bottles
+                FROM TrVocHead h
+                JOIN TrVocItem i   ON i.TransTypeID=h.TransTypeID AND i.VoucherNo=h.VoucherNo
+                JOIN MsTransType t ON t.id_key=h.TransTypeID
+                JOIN MsItemMaster m ON m.ItemID=i.ItemID
+                LEFT JOIN MsBrandMaster b ON b.BrandID=m.BrandID
+                WHERE t.ShortName='MS'
+                  AND ISNULL(h.Cancelled,'N') <> 'Y'
+                  AND ISNULL(i.FreeItemYN,'N') <> 'Y'
+                  AND h.VoucherDate >= '2025-04-01'
+                  AND h.VoucherDate <  '2026-04-01'
+                GROUP BY m.BrandID, b.BrandName
+                ORDER BY sales DESC
+            """),
             ]
 
             import io, zipfile
