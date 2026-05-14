@@ -649,6 +649,36 @@ def render():
                         END
                     ORDER BY d.DrCrIndicator, total_amount DESC
                 """),
+                ("23 — TrVocHead: all column names (find TP No + TP Date fields)", """
+                    SELECT COLUMN_NAME, DATA_TYPE, CHARACTER_MAXIMUM_LENGTH
+                    FROM INFORMATION_SCHEMA.COLUMNS
+                    WHERE TABLE_NAME = 'TrVocHead'
+                    ORDER BY ORDINAL_POSITION
+                """),
+                ("24 — TrVocHead sample: VoucherNo vs TP fields on MS invoices (spot Voucher vs TP date gap)", """
+                    SELECT TOP 30 *
+                    FROM TrVocHead h
+                    JOIN MsTransType t ON t.id_key=h.TransTypeID
+                    WHERE t.ShortName='MS'
+                      AND ISNULL(h.Cancelled,'N') <> 'Y'
+                      AND h.VoucherDate >= '2025-04-01'
+                      AND h.VoucherDate <  '2026-04-01'
+                    ORDER BY h.VoucherDate DESC
+                """),
+                ("25 — Any separate TP / Transport Permit tables in the database?", """
+                    SELECT TABLE_NAME
+                    FROM INFORMATION_SCHEMA.TABLES
+                    WHERE TABLE_TYPE='BASE TABLE'
+                      AND (
+                          TABLE_NAME LIKE '%TP%'
+                       OR TABLE_NAME LIKE '%Transport%'
+                       OR TABLE_NAME LIKE '%Permit%'
+                       OR TABLE_NAME LIKE '%Dispatch%'
+                       OR TABLE_NAME LIKE '%Challan%'
+                       OR TABLE_NAME LIKE '%Batch%'
+                      )
+                    ORDER BY TABLE_NAME
+                """),
             ]
             import io, zipfile
 
