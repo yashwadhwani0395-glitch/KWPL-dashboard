@@ -1,7 +1,7 @@
 import streamlit as st
 import plotly.graph_objects as go
 from db import query
-from config import (SALES_IN, PURCHASE_IN, NOT_CANCELLED, NOT_FREE, COLORS,
+from config import (SALES_IN, PURCHASE_IN, PURCHASE_ALL_IN, NOT_CANCELLED, NOT_FREE, COLORS,
                     brand_case, PRINCIPAL_COLORS, PRINCIPAL_ORDER)
 from utils import fmt_inr, fmt_qty, month_col
 from components.kpi_cards import kpi_row
@@ -18,16 +18,20 @@ def render():
     # ── KPIs ──────────────────────────────────────────────────────────────────
     # Total Sales from TrVocItem (product-level, excludes free items).
     # Combined query also fetches purchases to save a round-trip.
+    # Purchases = company invoices (PU) + excise duty paid to Maharashtra govt (BP/CE).
+    # For out-of-state/imported goods, companies invoice ex-excise; KWPL pays excise
+    # separately via bank/cash — those BP/CE vouchers carry TrVocItem lines tracking
+    # the exact bottles. Balance sheet Purchases ≈ PU + BP + CE TrVocItem ≈ ₹432 Cr.
     kpi_vol = query(f"""
         SELECT
             SUM(CASE WHEN t.ShortName='MS'
                      AND ISNULL(i.FreeItemYN,'N')<>'Y' THEN i.TotalAmount ELSE 0 END) AS total_sales,
-            SUM(CASE WHEN h.TransTypeID IN ({PURCHASE_IN})
+            SUM(CASE WHEN h.TransTypeID IN ({PURCHASE_ALL_IN})
                      AND ISNULL(i.FreeItemYN,'N')<>'Y' THEN i.TotalAmount ELSE 0 END) AS total_purchases
         FROM TrVocHead h
         JOIN TrVocItem i ON i.TransTypeID=h.TransTypeID AND i.VoucherNo=h.VoucherNo
         JOIN MsTransType t ON t.id_key=h.TransTypeID
-        WHERE (t.ShortName='MS' OR h.TransTypeID IN ({PURCHASE_IN}))
+        WHERE (t.ShortName='MS' OR h.TransTypeID IN ({PURCHASE_ALL_IN}))
           {NOT_CANCELLED} {date_filter}
     """)
     # Invoice count: only vouchers with actual product lines (excludes accounting-only entries)
@@ -93,12 +97,12 @@ def render():
             YEAR(h.VoucherDate) AS yr, MONTH(h.VoucherDate) AS mo,
             SUM(CASE WHEN t.ShortName='MS'
                      THEN i.TotalAmount ELSE 0 END) AS sales,
-            SUM(CASE WHEN h.TransTypeID IN ({PURCHASE_IN})
+            SUM(CASE WHEN h.TransTypeID IN ({PURCHASE_ALL_IN})
                      THEN i.TotalAmount ELSE 0 END) AS purchases
         FROM TrVocHead h
         JOIN TrVocItem i ON i.TransTypeID=h.TransTypeID AND i.VoucherNo=h.VoucherNo
         JOIN MsTransType t ON t.id_key=h.TransTypeID
-        WHERE (t.ShortName='MS' OR h.TransTypeID IN ({PURCHASE_IN}))
+        WHERE (t.ShortName='MS' OR h.TransTypeID IN ({PURCHASE_ALL_IN}))
           {NOT_CANCELLED} AND ISNULL(i.FreeItemYN,'N')<>'Y'
           {date_filter}
         GROUP BY YEAR(h.VoucherDate), MONTH(h.VoucherDate)
