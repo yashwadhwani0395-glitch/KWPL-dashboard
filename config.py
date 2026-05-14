@@ -2,22 +2,22 @@
 # MS (Sales): 1,6,7,11,13,15,16,17,20,23,24,25,26,32,33,35,47,51,52
 SALES_TYPES = (1, 6, 7, 11, 13, 15, 16, 17, 20, 23, 24, 25, 26, 32, 33, 35, 47, 51, 52)
 
-# PU = company purchase invoices (some include excise for Maharashtra-local companies).
-# For out-of-state/imported goods, companies invoice WITHOUT excise — KWPL pays
-# excise separately to Maharashtra govt, which is recorded as BP (40) / CE (18)
-# vouchers WITH TrVocItem entries tracking the exact bottles.
-# Balance sheet Purchases = PU TrVocItem + BP TrVocItem + CE TrVocItem ≈ ₹432 Cr.
+# PU = company purchase invoices.
+# Maharashtra excise law: local companies invoice including excise; out-of-state/
+# imported companies invoice ex-excise. Excise on imports is paid separately.
+# We need to confirm which TransTypeIDs carry that excise — pending diagnostic.
 PURCHASE_TYPES = (8, 10, 14, 21, 22, 27, 28, 30, 31, 38, 49, 53)
-EXCISE_TYPES   = (40, 18)   # BP=40 (bank excise), CE=18 (cash excise)
 
 RECEIPT_CODES = ('BR', 'CR')
 PAYMENT_CODES = ('BP', 'CE')
 
 SALES_IN      = ",".join(str(x) for x in SALES_TYPES)
 PURCHASE_IN   = ",".join(str(x) for x in PURCHASE_TYPES)
-EXCISE_IN     = ",".join(str(x) for x in EXCISE_TYPES)
-# Combined for total cost calculation (purchases KPI, monthly trend)
-PURCHASE_ALL_IN = ",".join(str(x) for x in PURCHASE_TYPES + EXCISE_TYPES)
+# BP (40) + CE (18) carry excise duty on imported goods — balance sheet purchases
+# = PU ₹183 Cr + BP ₹100 Cr + CE ₹147 Cr ≈ ₹432 Cr (matches ERP balance sheet).
+# PURCHASE_ALL_IN is for the P&L purchases KPI only; PURCHASE_IN stays for stock.
+EXCISE_TYPES    = (40, 18)
+PURCHASE_ALL_IN = PURCHASE_IN + "," + ",".join(str(x) for x in EXCISE_TYPES)
 
 # SQL filter fragments — ISNULL handles vouchers where field is NULL (not just 'N')
 NOT_CANCELLED = "AND ISNULL(h.Cancelled,'N') <> 'Y'"

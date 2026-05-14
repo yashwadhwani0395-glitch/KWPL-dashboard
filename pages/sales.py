@@ -151,9 +151,10 @@ def render():
         SELECT TOP 15 b.BrandName AS brand,
                SUM(i.TotalAmount) AS sales, SUM(i.TotalBottleQty) AS bottles
         FROM TrVocItem i
-        JOIN TrVocHead h ON h.TransTypeID=i.TransTypeID AND h.VoucherNo=i.VoucherNo
+        JOIN TrVocHead h  ON h.TransTypeID=i.TransTypeID AND h.VoucherNo=i.VoucherNo
         JOIN MsTransType t ON t.id_key=h.TransTypeID
-        JOIN MsBrandMaster b ON b.BrandID=i.BrandID
+        JOIN MsItemMaster m ON m.ItemID=i.ItemID
+        JOIN MsBrandMaster b ON b.BrandID=m.BrandID
         WHERE t.ShortName='MS' {NOT_CANCELLED} {NOT_FREE}
           {date_filter}
         GROUP BY b.BrandName ORDER BY sales DESC

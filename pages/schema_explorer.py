@@ -416,6 +416,84 @@ def render():
                     GROUP BY m.BrandID, b.BrandName
                     ORDER BY total_amount DESC
                 """),
+                ("16 — BF (JD/Woodford/GlenDronach) sales across ALL transaction types FY25-26", """
+                    SELECT
+                        t.ShortName, t.TransTypeName, t.id_key AS TransTypeID,
+                        b.BrandName,
+                        SUM(vi.TotalAmount)    AS total_amount,
+                        SUM(vi.TotalBottleQty) AS total_bottles,
+                        COUNT(*)               AS lines
+                    FROM TrVocItem vi
+                    JOIN TrVocHead h    ON h.TransTypeID=vi.TransTypeID AND h.VoucherNo=vi.VoucherNo
+                    JOIN MsTransType t  ON t.id_key=h.TransTypeID
+                    JOIN MsItemMaster m ON m.ItemID=vi.ItemID
+                    JOIN MsBrandMaster b ON b.BrandID=m.BrandID
+                    WHERE m.BrandID IN (576,577,578,579,580,583,585,588,592)
+                      AND ISNULL(h.Cancelled,'N') <> 'Y'
+                      AND ISNULL(vi.FreeItemYN,'N') <> 'Y'
+                      AND h.VoucherDate >= '2025-04-01'
+                      AND h.VoucherDate <  '2026-04-01'
+                    GROUP BY t.ShortName, t.TransTypeName, t.id_key, b.BrandName
+                    ORDER BY t.ShortName, total_amount DESC
+                """),
+                ("17 — BP + CE TrVocItem by principal (excise on which brands?) FY25-26", """
+                    SELECT TOP 30
+                        t.ShortName, t.TransTypeName,
+                        CASE
+                            WHEN m.BrandID IN (277,278,279,284,286,292,293,294,295,296,
+                                297,305,342,345,346,371,372,373,375,376,379,388,396,401,
+                                417,437,445,458,568,266,269,270,271,273,274,275,276,353,
+                                354,355,356,368,419,432,561,563,565,287,382,394,522,523,
+                                282,283,288,289,290,298,330,335,389,428,429,433,446,390,
+                                391,392,434,435,436,535,280,481,542,567,285,380,430,475,
+                                476,541,560,224,281,291,381,463,464,482,589,590,593)
+                                THEN 'Diageo'
+                            WHEN m.BrandID IN (213,217,223,555,556,559,569,570,582,591,
+                                594,218,360,323,487,90,110,450,215,225,331,332,272,333,
+                                358,265,267,334,477)
+                                THEN 'United Spirits'
+                            WHEN m.BrandID IN (78,80,109,126,189,329,483,486,557,586,595,
+                                84,112,214,327,344,378,479,478,573,574,571,572,38,219,
+                                448,552,566,443,558,77,554)
+                                THEN 'United Breweries'
+                            WHEN m.BrandID IN (576,577,578,579,580,583,585,588,592)
+                                THEN 'Brown-Forman'
+                            ELSE 'Others'
+                        END AS principal,
+                        SUM(vi.TotalAmount)    AS excise_amount,
+                        SUM(vi.TotalBottleQty) AS bottles
+                    FROM TrVocItem vi
+                    JOIN TrVocHead h    ON h.TransTypeID=vi.TransTypeID AND h.VoucherNo=vi.VoucherNo
+                    JOIN MsTransType t  ON t.id_key=h.TransTypeID
+                    JOIN MsItemMaster m ON m.ItemID=vi.ItemID
+                    WHERE h.TransTypeID IN (40,18)
+                      AND ISNULL(h.Cancelled,'N') <> 'Y'
+                      AND ISNULL(vi.FreeItemYN,'N') <> 'Y'
+                      AND h.VoucherDate >= '2025-04-01'
+                      AND h.VoucherDate <  '2026-04-01'
+                    GROUP BY t.ShortName, t.TransTypeName, CASE
+                            WHEN m.BrandID IN (277,278,279,284,286,292,293,294,295,296,
+                                297,305,342,345,346,371,372,373,375,376,379,388,396,401,
+                                417,437,445,458,568,266,269,270,271,273,274,275,276,353,
+                                354,355,356,368,419,432,561,563,565,287,382,394,522,523,
+                                282,283,288,289,290,298,330,335,389,428,429,433,446,390,
+                                391,392,434,435,436,535,280,481,542,567,285,380,430,475,
+                                476,541,560,224,281,291,381,463,464,482,589,590,593)
+                                THEN 'Diageo'
+                            WHEN m.BrandID IN (213,217,223,555,556,559,569,570,582,591,
+                                594,218,360,323,487,90,110,450,215,225,331,332,272,333,
+                                358,265,267,334,477)
+                                THEN 'United Spirits'
+                            WHEN m.BrandID IN (78,80,109,126,189,329,483,486,557,586,595,
+                                84,112,214,327,344,378,479,478,573,574,571,572,38,219,
+                                448,552,566,443,558,77,554)
+                                THEN 'United Breweries'
+                            WHEN m.BrandID IN (576,577,578,579,580,583,585,588,592)
+                                THEN 'Brown-Forman'
+                            ELSE 'Others'
+                        END
+                    ORDER BY excise_amount DESC
+                """),
                 ("15 — LD LOAD party breakdown: does it debit customers (= customer billing)?", """
                     SELECT
                         d.DrCrIndicator,
