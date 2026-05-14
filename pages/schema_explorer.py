@@ -3566,682 +3566,107 @@ def render():
                 """),
 
                 # ══════════════════════════════════════════════════════════════
-                # BLOCK AP — Item rates: purchase rate, sale rate, valuation rate
-                #   These drive stock valuation, margin, and bill verification.
+                # BLOCK AP — Item rates: find the exact stored rate columns
+                #   The ERP stores purchase rate, sale rate, valuation rate as
+                #   columns on MsItemMaster (and possibly MsBatchMaster).
+                #   We read them directly — no calculation needed.
                 # ══════════════════════════════════════════════════════════════
-                ("201 — MsItemMaster: EVERY column with type (find all rate fields)", """
+                ("201 — MsItemMaster: ALL columns with type — find every rate field", """
                     SELECT COLUMN_NAME, DATA_TYPE, NUMERIC_PRECISION, NUMERIC_SCALE, IS_NULLABLE
                     FROM INFORMATION_SCHEMA.COLUMNS
                     WHERE TABLE_NAME='MsItemMaster'
                     ORDER BY ORDINAL_POSITION
                 """),
-                ("202 — MsItemMaster: TOP 20 rows showing ALL rate columns side by side", """
-                    SELECT TOP 20 * FROM MsItemMaster ORDER BY ItemID
+                ("202 — MsItemMaster: TOP 30 rows — all stored rates as-is", """
+                    SELECT TOP 30 * FROM MsItemMaster ORDER BY ItemID
                 """),
-                ("203 — MsItemMaster: distinct rate values — understand the rate universe", """
-                    SELECT
-                        b.BrandName,
-                        lt.LiquorType,
-                        sz.SizeType,
-                        m.MrpBottRate,
-                        m.MrpCaseRate,
-                        COUNT(*) AS sku_count,
-                        MIN(m.ItemDescription) AS sample_item
-                    FROM MsItemMaster m
-                    LEFT JOIN MsBrandMaster b  ON b.BrandID=m.BrandID
-                    LEFT JOIN MsLiquorType lt  ON lt.LiquorTypeID=m.LiquorTypeID
-                    LEFT JOIN MsSizeType sz    ON sz.SizeTypeID=m.SizeTypeID
-                    GROUP BY b.BrandName, lt.LiquorType, sz.SizeType,
-                             m.MrpBottRate, m.MrpCaseRate
-                    ORDER BY m.MrpBottRate DESC
-                """),
-
-                # ══════════════════════════════════════════════════════════════
-                # Purchase rate: what was KWPL actually billed per bottle
-                # ══════════════════════════════════════════════════════════════
-                ("204 — Purchase rate per item: avg/min/max billed rate from PU invoices FY25-26", """
-                    SELECT
-                        m.ItemDescription,
-                        b.BrandName,
-                        sz.SizeType,
-                        m.MrpBottRate                            AS master_mrp_bott,
-                        m.MrpCaseRate                           AS master_mrp_case,
-                        AVG(i.BottleRate)                        AS avg_purchase_bott_rate,
-                        AVG(i.CaseRate)                          AS avg_purchase_case_rate,
-                        MIN(i.BottleRate)                        AS min_purchase_bott,
-                        MAX(i.BottleRate)                        AS max_purchase_bott,
-                        SUM(i.TotalBottleQty)                    AS bottles_purchased,
-                        SUM(i.TotalAmount)                       AS total_purchase_value
-                    FROM TrVocItem i
-                    JOIN TrVocHead h    ON h.TransTypeID=i.TransTypeID AND h.VoucherNo=i.VoucherNo
-                    JOIN MsItemMaster m ON m.ItemID=i.ItemID
-                    JOIN MsBrandMaster b ON b.BrandID=m.BrandID
-                    LEFT JOIN MsSizeType sz ON sz.SizeTypeID=m.SizeTypeID
-                    WHERE h.TransTypeID IN (8,10,14,21,22,27,28,30,31,38,49,53)
-                      AND ISNULL(h.Cancelled,'N')<>'Y'
-                      AND ISNULL(i.FreeItemYN,'N')<>'Y'
-                      AND h.VoucherDate>='2025-04-01' AND h.VoucherDate<'2026-04-01'
-                    GROUP BY m.ItemDescription, b.BrandName, sz.SizeType,
-                             m.MrpBottRate, m.MrpCaseRate
-                    ORDER BY total_purchase_value DESC
-                """),
-                ("205 — Sale rate per item: avg/min/max billed rate from MS invoices FY25-26", """
-                    SELECT
-                        m.ItemDescription,
-                        b.BrandName,
-                        sz.SizeType,
-                        m.MrpBottRate                            AS master_mrp_bott,
-                        AVG(i.BottleRate)                        AS avg_sale_bott_rate,
-                        AVG(i.CaseRate)                          AS avg_sale_case_rate,
-                        MIN(i.BottleRate)                        AS min_sale_bott,
-                        MAX(i.BottleRate)                        AS max_sale_bott,
-                        SUM(i.TotalBottleQty)                    AS bottles_sold,
-                        SUM(i.TotalAmount)                       AS total_sale_value
-                    FROM TrVocItem i
-                    JOIN TrVocHead h    ON h.TransTypeID=i.TransTypeID AND h.VoucherNo=i.VoucherNo
-                    JOIN MsTransType t  ON t.id_key=h.TransTypeID
-                    JOIN MsItemMaster m ON m.ItemID=i.ItemID
-                    JOIN MsBrandMaster b ON b.BrandID=m.BrandID
-                    LEFT JOIN MsSizeType sz ON sz.SizeTypeID=m.SizeTypeID
-                    WHERE t.ShortName='MS'
-                      AND ISNULL(h.Cancelled,'N')<>'Y'
-                      AND ISNULL(i.FreeItemYN,'N')<>'Y'
-                      AND h.VoucherDate>='2025-04-01' AND h.VoucherDate<'2026-04-01'
-                    GROUP BY m.ItemDescription, b.BrandName, sz.SizeType, m.MrpBottRate
-                    ORDER BY total_sale_value DESC
-                """),
-
-                # ══════════════════════════════════════════════════════════════
-                # Rate variance: where billed rate ≠ master rate
-                # ══════════════════════════════════════════════════════════════
-                ("206 — Sale rate vs MRP master: items sold above or below MRP", """
-                    SELECT
-                        m.ItemDescription,
-                        b.BrandName,
-                        m.MrpBottRate                              AS master_mrp,
-                        ROUND(AVG(i.BottleRate),2)                 AS avg_billed_rate,
-                        ROUND(AVG(i.BottleRate) - m.MrpBottRate,2) AS avg_variance,
-                        COUNT(DISTINCT CASE
-                            WHEN ROUND(i.BottleRate,2) <> ROUND(m.MrpBottRate,2)
-                            THEN h.VoucherNo END)                  AS invoices_with_variance,
-                        COUNT(DISTINCT h.VoucherNo)                AS total_invoices
-                    FROM TrVocItem i
-                    JOIN TrVocHead h    ON h.TransTypeID=i.TransTypeID AND h.VoucherNo=i.VoucherNo
-                    JOIN MsTransType t  ON t.id_key=h.TransTypeID
-                    JOIN MsItemMaster m ON m.ItemID=i.ItemID
-                    JOIN MsBrandMaster b ON b.BrandID=m.BrandID
-                    WHERE t.ShortName='MS'
-                      AND ISNULL(h.Cancelled,'N')<>'Y'
-                      AND ISNULL(i.FreeItemYN,'N')<>'Y'
-                      AND h.VoucherDate>='2025-04-01' AND h.VoucherDate<'2026-04-01'
-                      AND m.MrpBottRate > 0
-                    GROUP BY m.ItemDescription, b.BrandName, m.MrpBottRate
-                    HAVING COUNT(DISTINCT CASE
-                        WHEN ROUND(i.BottleRate,2) <> ROUND(m.MrpBottRate,2)
-                        THEN h.VoucherNo END) > 0
-                    ORDER BY ABS(ROUND(AVG(i.BottleRate) - m.MrpBottRate,2)) DESC
-                """),
-                ("207 — Purchase rate variance: invoices where billed rate changed by >5% vs avg", """
-                    WITH avg_rates AS (
-                        SELECT i.ItemID,
-                               AVG(i.BottleRate) AS avg_bott,
-                               AVG(i.CaseRate)   AS avg_case
-                        FROM TrVocItem i
-                        JOIN TrVocHead h ON h.TransTypeID=i.TransTypeID AND h.VoucherNo=i.VoucherNo
-                        WHERE h.TransTypeID IN (8,10,14,21,22,27,28,30,31,38,49,53)
-                          AND ISNULL(h.Cancelled,'N')<>'Y'
-                          AND ISNULL(i.FreeItemYN,'N')<>'Y'
-                          AND h.VoucherDate>='2025-04-01' AND h.VoucherDate<'2026-04-01'
-                        GROUP BY i.ItemID
-                    )
-                    SELECT
-                        h.VoucherDate, h.VoucherNo,
-                        p_sup.PartyName                             AS supplier,
-                        m.ItemDescription,
-                        b.BrandName,
-                        i.BottleRate                                AS billed_rate,
-                        ROUND(ar.avg_bott,2)                        AS avg_rate,
-                        ROUND((i.BottleRate - ar.avg_bott)/
-                              NULLIF(ar.avg_bott,0)*100, 1)         AS pct_variance,
-                        i.TotalBottleQty                            AS bottles
-                    FROM TrVocItem i
-                    JOIN TrVocHead h    ON h.TransTypeID=i.TransTypeID AND h.VoucherNo=i.VoucherNo
-                    JOIN MsItemMaster m ON m.ItemID=i.ItemID
-                    JOIN MsBrandMaster b ON b.BrandID=m.BrandID
-                    JOIN avg_rates ar   ON ar.ItemID=i.ItemID
-                    LEFT JOIN TrVocDetail d_sup ON d_sup.TransTypeID=h.TransTypeID
-                                               AND d_sup.VoucherNo=h.VoucherNo
-                                               AND d_sup.DrCrIndicator='C'
-                                               AND LEFT(d_sup.PartyID,1)='C'
-                    LEFT JOIN MsPartyMaster p_sup ON p_sup.PartyID=d_sup.PartyID
-                    WHERE h.TransTypeID IN (8,10,14,21,22,27,28,30,31,38,49,53)
-                      AND ISNULL(h.Cancelled,'N')<>'Y'
-                      AND ISNULL(i.FreeItemYN,'N')<>'Y'
-                      AND h.VoucherDate>='2025-04-01' AND h.VoucherDate<'2026-04-01'
-                      AND ar.avg_bott > 0
-                      AND ABS(i.BottleRate - ar.avg_bott)/ar.avg_bott > 0.05
-                    ORDER BY ABS(i.BottleRate - ar.avg_bott)/ar.avg_bott DESC
-                """),
-
-                # ══════════════════════════════════════════════════════════════
-                # Stock valuation: the difference between using MRP vs cost
-                # ══════════════════════════════════════════════════════════════
-                ("208 — Stock at MRP vs stock at avg purchase cost: the difference", """
-                    WITH pur_rates AS (
-                        SELECT i.ItemID,
-                               SUM(i.TotalAmount)    AS total_cost,
-                               SUM(i.TotalBottleQty) AS total_bottles,
-                               CASE WHEN SUM(i.TotalBottleQty)>0
-                                    THEN SUM(i.TotalAmount)/SUM(i.TotalBottleQty)
-                                    ELSE 0 END        AS avg_cost_per_bottle
-                        FROM TrVocItem i
-                        JOIN TrVocHead h ON h.TransTypeID=i.TransTypeID AND h.VoucherNo=i.VoucherNo
-                        WHERE h.TransTypeID IN (8,10,14,21,22,27,28,30,31,38,49,53)
-                          AND ISNULL(h.Cancelled,'N')<>'Y'
-                          AND ISNULL(i.FreeItemYN,'N')<>'Y'
-                        GROUP BY i.ItemID
-                    ),
-                    stock_qty AS (
-                        SELECT vi.ItemID,
-                               SUM(CASE WHEN h.TransTypeID IN (8,10,14,21,22,27,28,30,31,38,49,53)
-                                        THEN vi.TotalBottleQty ELSE -vi.TotalBottleQty END) AS net_bottles
-                        FROM TrVocItem vi
-                        JOIN TrVocHead h ON h.TransTypeID=vi.TransTypeID AND h.VoucherNo=vi.VoucherNo
-                        JOIN MsTransType t ON t.id_key=h.TransTypeID
-                        WHERE h.TransTypeID IN (8,10,14,21,22,27,28,30,31,38,49,53)
-                           OR t.ShortName IN ('MS','SA','LD')
-                        AND ISNULL(h.Cancelled,'N')<>'Y'
-                        GROUP BY vi.ItemID
-                    )
-                    SELECT
-                        b.BrandName,
-                        SUM(sq.net_bottles)                           AS stock_bottles,
-                        ROUND(SUM(sq.net_bottles * m.MrpBottRate),0)  AS value_at_MRP,
-                        ROUND(SUM(sq.net_bottles * pr.avg_cost_per_bottle),0) AS value_at_cost,
-                        ROUND(SUM(sq.net_bottles * m.MrpBottRate)
-                              - SUM(sq.net_bottles * pr.avg_cost_per_bottle),0) AS mrp_vs_cost_diff
-                    FROM stock_qty sq
-                    JOIN MsItemMaster m  ON m.ItemID=sq.ItemID
-                    JOIN MsBrandMaster b ON b.BrandID=m.BrandID
-                    LEFT JOIN pur_rates pr ON pr.ItemID=sq.ItemID
-                    WHERE sq.net_bottles > 0
-                    GROUP BY b.BrandName
-                    ORDER BY value_at_MRP DESC
-                """),
-                ("209 — Stock valuation: company-level MRP vs cost with gross margin %", """
-                    WITH pur_rates AS (
-                        SELECT i.ItemID,
-                               CASE WHEN SUM(i.TotalBottleQty)>0
-                                    THEN SUM(i.TotalAmount)/SUM(i.TotalBottleQty)
-                                    ELSE 0 END AS avg_cost_per_bottle
-                        FROM TrVocItem i
-                        JOIN TrVocHead h ON h.TransTypeID=i.TransTypeID AND h.VoucherNo=i.VoucherNo
-                        WHERE h.TransTypeID IN (8,10,14,21,22,27,28,30,31,38,49,53)
-                          AND ISNULL(h.Cancelled,'N')<>'Y'
-                          AND ISNULL(i.FreeItemYN,'N')<>'Y'
-                        GROUP BY i.ItemID
-                    ),
-                    stock_qty AS (
-                        SELECT vi.ItemID,
-                               SUM(CASE WHEN h.TransTypeID IN (8,10,14,21,22,27,28,30,31,38,49,53)
-                                        THEN vi.TotalBottleQty ELSE -vi.TotalBottleQty END) AS net_bottles
-                        FROM TrVocItem vi
-                        JOIN TrVocHead h ON h.TransTypeID=vi.TransTypeID AND h.VoucherNo=vi.VoucherNo
-                        JOIN MsTransType t ON t.id_key=h.TransTypeID
-                        WHERE (h.TransTypeID IN (8,10,14,21,22,27,28,30,31,38,49,53)
-                               OR t.ShortName IN ('MS','SA','LD'))
-                          AND ISNULL(h.Cancelled,'N')<>'Y'
-                        GROUP BY vi.ItemID
-                    )
-                    SELECT
-                        SUM(sq.net_bottles)                                    AS total_stock_bottles,
-                        ROUND(SUM(sq.net_bottles * m.MrpBottRate),0)           AS stock_at_MRP,
-                        ROUND(SUM(sq.net_bottles * pr.avg_cost_per_bottle),0)  AS stock_at_cost,
-                        ROUND(100.0*(SUM(sq.net_bottles * m.MrpBottRate)
-                              - SUM(sq.net_bottles * pr.avg_cost_per_bottle))
-                              / NULLIF(SUM(sq.net_bottles * m.MrpBottRate),0),1) AS margin_pct_on_MRP
-                    FROM stock_qty sq
-                    JOIN MsItemMaster m ON m.ItemID=sq.ItemID
-                    LEFT JOIN pur_rates pr ON pr.ItemID=sq.ItemID
-                    WHERE sq.net_bottles > 0
-                """),
-
-                # ══════════════════════════════════════════════════════════════
-                # Gross margin per brand: sale rate vs purchase rate
-                # ══════════════════════════════════════════════════════════════
-                ("210 — Gross margin per brand: avg sale rate vs avg purchase rate per bottle", """
-                    WITH sale AS (
-                        SELECT i.ItemID,
-                               SUM(i.TotalAmount)    AS sale_value,
-                               SUM(i.TotalBottleQty) AS sale_bottles
-                        FROM TrVocItem i
-                        JOIN TrVocHead h ON h.TransTypeID=i.TransTypeID AND h.VoucherNo=i.VoucherNo
-                        JOIN MsTransType t ON t.id_key=h.TransTypeID
-                        WHERE t.ShortName='MS'
-                          AND ISNULL(h.Cancelled,'N')<>'Y'
-                          AND ISNULL(i.FreeItemYN,'N')<>'Y'
-                          AND h.VoucherDate>='2025-04-01' AND h.VoucherDate<'2026-04-01'
-                        GROUP BY i.ItemID
-                    ),
-                    pur AS (
-                        SELECT i.ItemID,
-                               SUM(i.TotalAmount)    AS pur_value,
-                               SUM(i.TotalBottleQty) AS pur_bottles
-                        FROM TrVocItem i
-                        JOIN TrVocHead h ON h.TransTypeID=i.TransTypeID AND h.VoucherNo=i.VoucherNo
-                        WHERE h.TransTypeID IN (8,10,14,21,22,27,28,30,31,38,49,53)
-                          AND ISNULL(h.Cancelled,'N')<>'Y'
-                          AND ISNULL(i.FreeItemYN,'N')<>'Y'
-                          AND h.VoucherDate>='2025-04-01' AND h.VoucherDate<'2026-04-01'
-                        GROUP BY i.ItemID
-                    )
-                    SELECT
-                        b.BrandName,
-                        lt.LiquorType,
-                        SUM(s.sale_bottles)   AS sold_bottles,
-                        ROUND(SUM(s.sale_value),0)   AS sale_value,
-                        ROUND(SUM(p.pur_value * s.sale_bottles
-                                  / NULLIF(p.pur_bottles,0)),0) AS cogs_at_cost,
-                        ROUND(SUM(s.sale_value)
-                              - SUM(p.pur_value * s.sale_bottles
-                                    / NULLIF(p.pur_bottles,0)),0) AS gross_profit,
-                        ROUND(100.0*(SUM(s.sale_value)
-                              - SUM(p.pur_value * s.sale_bottles / NULLIF(p.pur_bottles,0)))
-                              / NULLIF(SUM(s.sale_value),0),1)    AS gp_pct
-                    FROM sale s
-                    JOIN MsItemMaster m  ON m.ItemID=s.ItemID
-                    JOIN MsBrandMaster b ON b.BrandID=m.BrandID
-                    LEFT JOIN MsLiquorType lt ON lt.LiquorTypeID=m.LiquorTypeID
-                    LEFT JOIN pur p ON p.ItemID=s.ItemID
-                    GROUP BY b.BrandName, lt.LiquorType
-                    ORDER BY gross_profit DESC
-                """),
-                ("211 — Gross margin per customer: sale value vs cost of goods sold", """
-                    WITH sale AS (
-                        SELECT h.VoucherNo, h.TransTypeID,
-                               i.ItemID,
-                               i.TotalAmount    AS sale_val,
-                               i.TotalBottleQty AS sale_qty
-                        FROM TrVocItem i
-                        JOIN TrVocHead h ON h.TransTypeID=i.TransTypeID AND h.VoucherNo=i.VoucherNo
-                        JOIN MsTransType t ON t.id_key=h.TransTypeID
-                        WHERE t.ShortName='MS'
-                          AND ISNULL(h.Cancelled,'N')<>'Y'
-                          AND ISNULL(i.FreeItemYN,'N')<>'Y'
-                          AND h.VoucherDate>='2025-04-01' AND h.VoucherDate<'2026-04-01'
-                    ),
-                    pur_avg AS (
-                        SELECT i.ItemID,
-                               CASE WHEN SUM(i.TotalBottleQty)>0
-                                    THEN SUM(i.TotalAmount)/SUM(i.TotalBottleQty)
-                                    ELSE 0 END AS avg_cost
-                        FROM TrVocItem i
-                        JOIN TrVocHead h ON h.TransTypeID=i.TransTypeID AND h.VoucherNo=i.VoucherNo
-                        WHERE h.TransTypeID IN (8,10,14,21,22,27,28,30,31,38,49,53)
-                          AND ISNULL(h.Cancelled,'N')<>'Y'
-                          AND ISNULL(i.FreeItemYN,'N')<>'Y'
-                        GROUP BY i.ItemID
-                    )
-                    SELECT TOP 20
-                        p.PartyName                                       AS customer,
-                        ROUND(SUM(s.sale_val),0)                         AS sale_value,
-                        ROUND(SUM(s.sale_qty * pa.avg_cost),0)           AS cogs,
-                        ROUND(SUM(s.sale_val) - SUM(s.sale_qty*pa.avg_cost),0) AS gross_profit,
-                        ROUND(100.0*(SUM(s.sale_val)-SUM(s.sale_qty*pa.avg_cost))
-                              /NULLIF(SUM(s.sale_val),0),1)              AS gp_pct
-                    FROM sale s
-                    JOIN pur_avg pa ON pa.ItemID=s.ItemID
-                    LEFT JOIN TrVocDetail d ON d.TransTypeID=s.TransTypeID
-                                           AND d.VoucherNo=s.VoucherNo
-                                           AND d.DrCrIndicator='D' AND LEFT(d.PartyID,1)='D'
-                    LEFT JOIN MsPartyMaster p ON p.PartyID=d.PartyID
-                    GROUP BY p.PartyName
-                    ORDER BY gross_profit DESC
-                """),
-
-                # ══════════════════════════════════════════════════════════════
-                # Purchase bill verification: what KWPL was billed vs should pay
-                # ══════════════════════════════════════════════════════════════
-                ("212 — Purchase bill check: invoice total vs (bottles × rate) — any discrepancy?", """
-                    SELECT TOP 20
-                        h.VoucherDate, h.VoucherNo,
-                        p.PartyName                              AS supplier,
-                        SUM(i.TotalBottleQty)                   AS bottles,
-                        SUM(i.CaseQty)                          AS cases,
-                        SUM(i.TotalAmount)                      AS total_item_amount,
-                        SUM(i.TotalBottleQty * i.BottleRate)    AS bottles_x_rate,
-                        SUM(i.CaseQty * i.CaseRate)             AS cases_x_rate,
-                        SUM(i.TotalAmount)
-                            - SUM(i.TotalBottleQty * i.BottleRate) AS line_diff
-                    FROM TrVocItem i
-                    JOIN TrVocHead h ON h.TransTypeID=i.TransTypeID AND h.VoucherNo=i.VoucherNo
-                    LEFT JOIN TrVocDetail d ON d.TransTypeID=h.TransTypeID
-                                           AND d.VoucherNo=h.VoucherNo
-                                           AND d.DrCrIndicator='C' AND LEFT(d.PartyID,1)='C'
-                    LEFT JOIN MsPartyMaster p ON p.PartyID=d.PartyID
-                    WHERE h.TransTypeID IN (8,10,14,21,22,27,28,30,31,38,49,53)
-                      AND ISNULL(h.Cancelled,'N')<>'Y'
-                      AND ISNULL(i.FreeItemYN,'N')<>'Y'
-                      AND h.VoucherDate>='2025-04-01' AND h.VoucherDate<'2026-04-01'
-                    GROUP BY h.VoucherDate, h.VoucherNo, p.PartyName
-                    HAVING ABS(SUM(i.TotalAmount) - SUM(i.TotalBottleQty * i.BottleRate)) > 1
-                    ORDER BY ABS(SUM(i.TotalAmount) - SUM(i.TotalBottleQty * i.BottleRate)) DESC
-                """),
-                ("213 — Purchase total by supplier: item total vs accounting total (TrVocDetail CR)", """
-                    SELECT
-                        p.PartyName                     AS supplier,
-                        SUM(i.TotalAmount)              AS item_total,
-                        SUM(d_cr.cr_amount)             AS accounting_cr,
-                        SUM(i.TotalAmount)
-                            - ISNULL(SUM(d_cr.cr_amount),0) AS difference
-                    FROM TrVocHead h
-                    LEFT JOIN TrVocItem i ON i.TransTypeID=h.TransTypeID AND i.VoucherNo=h.VoucherNo
-                                         AND ISNULL(i.FreeItemYN,'N')<>'Y'
-                    LEFT JOIN (
-                        SELECT TransTypeID, VoucherNo, PartyID, SUM(Amount) AS cr_amount
-                        FROM TrVocDetail
-                        WHERE DrCrIndicator='C' AND LEFT(PartyID,1)='C'
-                        GROUP BY TransTypeID, VoucherNo, PartyID
-                    ) d_cr ON d_cr.TransTypeID=h.TransTypeID AND d_cr.VoucherNo=h.VoucherNo
-                    LEFT JOIN MsPartyMaster p ON p.PartyID=d_cr.PartyID
-                    WHERE h.TransTypeID IN (8,10,14,21,22,27,28,30,31,38,49,53)
-                      AND ISNULL(h.Cancelled,'N')<>'Y'
-                      AND h.VoucherDate>='2025-04-01' AND h.VoucherDate<'2026-04-01'
-                    GROUP BY p.PartyName
-                    ORDER BY item_total DESC
-                """),
-
-                # ══════════════════════════════════════════════════════════════
-                # Batch-level valuation (FIFO if batches are date-ordered)
-                # ══════════════════════════════════════════════════════════════
-                ("214 — Batch purchase cost: what was paid per batch (for FIFO valuation)", """
-                    SELECT
-                        i.BatchID,
-                        m.ItemDescription,
-                        b.BrandName,
-                        h.VoucherDate                              AS purchase_date,
-                        SUM(i.TotalBottleQty)                     AS bottles_in_batch,
-                        SUM(i.TotalAmount)                        AS batch_total_cost,
-                        CASE WHEN SUM(i.TotalBottleQty)>0
-                             THEN ROUND(SUM(i.TotalAmount)/SUM(i.TotalBottleQty),2)
-                             ELSE 0 END                            AS cost_per_bottle,
-                        m.MrpBottRate                             AS mrp_per_bottle
-                    FROM TrVocItem i
-                    JOIN TrVocHead h ON h.TransTypeID=i.TransTypeID AND h.VoucherNo=i.VoucherNo
-                    JOIN MsItemMaster m ON m.ItemID=i.ItemID
-                    JOIN MsBrandMaster b ON b.BrandID=m.BrandID
-                    WHERE h.TransTypeID IN (8,10,14,21,22,27,28,30,31,38,49,53)
-                      AND ISNULL(h.Cancelled,'N')<>'Y'
-                      AND ISNULL(i.FreeItemYN,'N')<>'Y'
-                      AND i.BatchID IS NOT NULL AND i.BatchID<>0
-                      AND h.VoucherDate>='2025-04-01' AND h.VoucherDate<'2026-04-01'
-                    GROUP BY i.BatchID, m.ItemDescription, b.BrandName,
-                             h.VoucherDate, m.MrpBottRate
-                    ORDER BY h.VoucherDate DESC
-                """),
-                ("215 — Current stock valued three ways: MRP vs avg-cost vs last-purchase-cost", """
-                    WITH stock_qty AS (
-                        SELECT vi.ItemID,
-                               SUM(CASE WHEN h.TransTypeID IN (8,10,14,21,22,27,28,30,31,38,49,53)
-                                        THEN vi.TotalBottleQty ELSE -vi.TotalBottleQty END) AS net_bottles
-                        FROM TrVocItem vi
-                        JOIN TrVocHead h ON h.TransTypeID=vi.TransTypeID AND h.VoucherNo=vi.VoucherNo
-                        JOIN MsTransType t ON t.id_key=h.TransTypeID
-                        WHERE (h.TransTypeID IN (8,10,14,21,22,27,28,30,31,38,49,53)
-                               OR t.ShortName IN ('MS','SA','LD'))
-                          AND ISNULL(h.Cancelled,'N')<>'Y'
-                        GROUP BY vi.ItemID
-                    ),
-                    avg_cost AS (
-                        SELECT i.ItemID,
-                               SUM(i.TotalAmount)/NULLIF(SUM(i.TotalBottleQty),0) AS avg_c
-                        FROM TrVocItem i
-                        JOIN TrVocHead h ON h.TransTypeID=i.TransTypeID AND h.VoucherNo=i.VoucherNo
-                        WHERE h.TransTypeID IN (8,10,14,21,22,27,28,30,31,38,49,53)
-                          AND ISNULL(h.Cancelled,'N')<>'Y'
-                        GROUP BY i.ItemID
-                    ),
-                    last_cost AS (
-                        SELECT i.ItemID, i.BottleRate AS last_c
-                        FROM TrVocItem i
-                        JOIN TrVocHead h ON h.TransTypeID=i.TransTypeID AND h.VoucherNo=i.VoucherNo
-                        WHERE h.TransTypeID IN (8,10,14,21,22,27,28,30,31,38,49,53)
-                          AND ISNULL(h.Cancelled,'N')<>'Y'
-                          AND h.VoucherDate = (
-                              SELECT MAX(h2.VoucherDate)
-                              FROM TrVocItem i2
-                              JOIN TrVocHead h2 ON h2.TransTypeID=i2.TransTypeID AND h2.VoucherNo=i2.VoucherNo
-                              WHERE h2.TransTypeID IN (8,10,14,21,22,27,28,30,31,38,49,53)
-                                AND ISNULL(h2.Cancelled,'N')<>'Y'
-                                AND i2.ItemID=i.ItemID
-                          )
-                    )
-                    SELECT
-                        SUM(sq.net_bottles)                                       AS total_stock_bottles,
-                        ROUND(SUM(sq.net_bottles * m.MrpBottRate),0)             AS at_MRP,
-                        ROUND(SUM(sq.net_bottles * ac.avg_c),0)                  AS at_avg_cost,
-                        ROUND(SUM(sq.net_bottles * lc.last_c),0)                 AS at_last_cost,
-                        ROUND(SUM(sq.net_bottles * m.MrpBottRate)
-                              - SUM(sq.net_bottles * ac.avg_c),0)                AS MRP_minus_avg_cost
-                    FROM stock_qty sq
-                    JOIN MsItemMaster m ON m.ItemID=sq.ItemID
-                    LEFT JOIN avg_cost ac ON ac.ItemID=sq.ItemID
-                    LEFT JOIN last_cost lc ON lc.ItemID=sq.ItemID
-                    WHERE sq.net_bottles > 0
-                """),
-
-                # ══════════════════════════════════════════════════════════════
-                # Price change history: when did rates change during the year
-                # ══════════════════════════════════════════════════════════════
-                ("216 — Purchase rate history per item: month-by-month avg cost", """
-                    SELECT
-                        m.ItemDescription,
-                        b.BrandName,
-                        YEAR(h.VoucherDate) AS yr, MONTH(h.VoucherDate) AS mo,
-                        ROUND(AVG(i.BottleRate),2) AS avg_purchase_rate,
-                        SUM(i.TotalBottleQty)      AS bottles,
-                        SUM(i.TotalAmount)         AS value
-                    FROM TrVocItem i
-                    JOIN TrVocHead h    ON h.TransTypeID=i.TransTypeID AND h.VoucherNo=i.VoucherNo
-                    JOIN MsItemMaster m ON m.ItemID=i.ItemID
-                    JOIN MsBrandMaster b ON b.BrandID=m.BrandID
-                    WHERE h.TransTypeID IN (8,10,14,21,22,27,28,30,31,38,49,53)
-                      AND ISNULL(h.Cancelled,'N')<>'Y'
-                      AND ISNULL(i.FreeItemYN,'N')<>'Y'
-                      AND h.VoucherDate>='2025-04-01' AND h.VoucherDate<'2026-04-01'
-                    GROUP BY m.ItemDescription, b.BrandName,
-                             YEAR(h.VoucherDate), MONTH(h.VoucherDate)
-                    ORDER BY b.BrandName, m.ItemDescription, yr, mo
-                """),
-                ("217 — MRP change detection: items where MrpBottRate on TrVocItem varied by month", """
-                    SELECT
-                        m.ItemDescription,
-                        b.BrandName,
-                        YEAR(h.VoucherDate) AS yr, MONTH(h.VoucherDate) AS mo,
-                        MIN(i.BottleRate)   AS min_sale_rate,
-                        MAX(i.BottleRate)   AS max_sale_rate,
-                        MAX(i.BottleRate) - MIN(i.BottleRate) AS rate_spread
-                    FROM TrVocItem i
-                    JOIN TrVocHead h    ON h.TransTypeID=i.TransTypeID AND h.VoucherNo=i.VoucherNo
-                    JOIN MsTransType t  ON t.id_key=h.TransTypeID
-                    JOIN MsItemMaster m ON m.ItemID=i.ItemID
-                    JOIN MsBrandMaster b ON b.BrandID=m.BrandID
-                    WHERE t.ShortName='MS'
-                      AND ISNULL(h.Cancelled,'N')<>'Y'
-                      AND ISNULL(i.FreeItemYN,'N')<>'Y'
-                      AND h.VoucherDate>='2025-04-01' AND h.VoucherDate<'2026-04-01'
-                    GROUP BY m.ItemDescription, b.BrandName,
-                             YEAR(h.VoucherDate), MONTH(h.VoucherDate)
-                    HAVING MAX(i.BottleRate) - MIN(i.BottleRate) > 0
-                    ORDER BY rate_spread DESC
-                """),
-
-                # ══════════════════════════════════════════════════════════════
-                # Does MsItemMaster have a separate cost/valuation rate column?
-                # ══════════════════════════════════════════════════════════════
-                ("218 — MsItemMaster numeric columns: are there PurchaseRate/ValuationRate fields?", """
-                    SELECT
-                        COLUMN_NAME,
-                        DATA_TYPE,
-                        NUMERIC_PRECISION,
-                        NUMERIC_SCALE
+                ("203 — MsItemMaster: purchase rate, sale rate, valuation rate — all numeric fields", """
+                    SELECT COLUMN_NAME, DATA_TYPE, NUMERIC_PRECISION, NUMERIC_SCALE
                     FROM INFORMATION_SCHEMA.COLUMNS
                     WHERE TABLE_NAME='MsItemMaster'
                       AND DATA_TYPE IN ('decimal','numeric','float','money','smallmoney','int','bigint')
                     ORDER BY ORDINAL_POSITION
                 """),
-                ("219 — MsBatchMaster numeric columns: are batch-level rates stored?", """
+                ("204 — MsItemMaster: all items with every rate column (read stored values directly)", """
                     SELECT
-                        COLUMN_NAME, DATA_TYPE, NUMERIC_PRECISION, NUMERIC_SCALE
+                        m.ItemID, m.ItemDescription,
+                        b.BrandName,
+                        lt.LiquorType,
+                        sz.SizeType,
+                        m.*
+                    FROM MsItemMaster m
+                    LEFT JOIN MsBrandMaster b  ON b.BrandID=m.BrandID
+                    LEFT JOIN MsLiquorType lt  ON lt.LiquorTypeID=m.LiquorTypeID
+                    LEFT JOIN MsSizeType sz    ON sz.SizeTypeID=m.SizeTypeID
+                    ORDER BY b.BrandName, m.ItemDescription
+                """),
+                ("205 — MsBatchMaster: all numeric columns — does each batch carry its own rates?", """
+                    SELECT COLUMN_NAME, DATA_TYPE, NUMERIC_PRECISION, NUMERIC_SCALE
                     FROM INFORMATION_SCHEMA.COLUMNS
                     WHERE TABLE_NAME='MsBatchMaster'
                       AND DATA_TYPE IN ('decimal','numeric','float','money','smallmoney','int','bigint')
                     ORDER BY ORDINAL_POSITION
                 """),
-                ("220 — TrVocItem ALL numeric columns: every rate/amount field that exists", """
-                    SELECT
-                        COLUMN_NAME, DATA_TYPE, NUMERIC_PRECISION, NUMERIC_SCALE
+                ("206 — MsBatchMaster: full dump of all rows with item names", """
+                    SELECT b.*, m.ItemDescription, br.BrandName
+                    FROM MsBatchMaster b
+                    LEFT JOIN MsItemMaster m  ON m.ItemID=b.ItemID
+                    LEFT JOIN MsBrandMaster br ON br.BrandID=m.BrandID
+                    ORDER BY b.BatchID DESC
+                """),
+                ("207 — TrVocItem: all numeric columns — what rate/amount fields are on each line?", """
+                    SELECT COLUMN_NAME, DATA_TYPE, NUMERIC_PRECISION, NUMERIC_SCALE
                     FROM INFORMATION_SCHEMA.COLUMNS
                     WHERE TABLE_NAME='TrVocItem'
                       AND DATA_TYPE IN ('decimal','numeric','float','money','smallmoney','int','bigint')
                     ORDER BY ORDINAL_POSITION
                 """),
-                ("221 — CaseRate × CaseQty vs TotalAmount: do they match on purchase bills?", """
-                    SELECT TOP 20
+                ("208 — Purchase bill line items: all columns as stored (read exactly what ERP saved)", """
+                    SELECT TOP 30
                         h.VoucherDate, h.VoucherNo,
-                        m.ItemDescription,
-                        i.CaseQty, i.CaseRate,
-                        i.BottleQty, i.BottleRate,
-                        i.TotalBottleQty,
-                        i.TotalAmount,
-                        ROUND(i.CaseQty * i.CaseRate, 2) AS case_x_rate,
-                        ROUND(i.TotalBottleQty * i.BottleRate, 2) AS bott_x_rate,
-                        i.TotalAmount - ROUND(i.TotalBottleQty * i.BottleRate, 2) AS diff
+                        t.ShortName,
+                        i.*,
+                        m.ItemDescription, b.BrandName
                     FROM TrVocItem i
-                    JOIN TrVocHead h ON h.TransTypeID=i.TransTypeID AND h.VoucherNo=i.VoucherNo
+                    JOIN TrVocHead h    ON h.TransTypeID=i.TransTypeID AND h.VoucherNo=i.VoucherNo
+                    JOIN MsTransType t  ON t.id_key=h.TransTypeID
                     JOIN MsItemMaster m ON m.ItemID=i.ItemID
+                    JOIN MsBrandMaster b ON b.BrandID=m.BrandID
                     WHERE h.TransTypeID IN (8,10,14,21,22,27,28,30,31,38,49,53)
                       AND ISNULL(h.Cancelled,'N')<>'Y'
                       AND ISNULL(i.FreeItemYN,'N')<>'Y'
                       AND h.VoucherDate>='2025-04-01'
-                    ORDER BY ABS(i.TotalAmount - ROUND(i.TotalBottleQty * i.BottleRate,2)) DESC
+                    ORDER BY h.VoucherDate DESC, i.VoucherNo, i.SerialNo
                 """),
-                ("222 — COGS calculation check: FY25-26 sold bottles × avg purchase cost", """
-                    WITH pur_avg AS (
-                        SELECT i.ItemID,
-                               SUM(i.TotalAmount)/NULLIF(SUM(i.TotalBottleQty),0) AS avg_cost
-                        FROM TrVocItem i
-                        JOIN TrVocHead h ON h.TransTypeID=i.TransTypeID AND h.VoucherNo=i.VoucherNo
-                        WHERE h.TransTypeID IN (8,10,14,21,22,27,28,30,31,38,49,53)
-                          AND ISNULL(h.Cancelled,'N')<>'Y'
-                          AND ISNULL(i.FreeItemYN,'N')<>'Y'
-                        GROUP BY i.ItemID
-                    )
-                    SELECT
-                        SUM(i.TotalAmount)                             AS sale_value_MRP,
-                        ROUND(SUM(i.TotalBottleQty * pa.avg_cost),0)  AS cogs_at_cost,
-                        ROUND(SUM(i.TotalAmount)
-                              - SUM(i.TotalBottleQty * pa.avg_cost),0) AS gross_profit,
-                        ROUND(100.0*(SUM(i.TotalAmount)
-                              - SUM(i.TotalBottleQty * pa.avg_cost))
-                              /NULLIF(SUM(i.TotalAmount),0),2)         AS gp_pct
-                    FROM TrVocItem i
-                    JOIN TrVocHead h ON h.TransTypeID=i.TransTypeID AND h.VoucherNo=i.VoucherNo
-                    JOIN MsTransType t ON t.id_key=h.TransTypeID
-                    LEFT JOIN pur_avg pa ON pa.ItemID=i.ItemID
-                    WHERE t.ShortName='MS'
-                      AND ISNULL(h.Cancelled,'N')<>'Y'
-                      AND ISNULL(i.FreeItemYN,'N')<>'Y'
-                      AND h.VoucherDate>='2025-04-01' AND h.VoucherDate<'2026-04-01'
-                """),
-                ("223 — Salesman gross margin: who is selling at better margins?", """
-                    WITH pur_avg AS (
-                        SELECT i.ItemID,
-                               SUM(i.TotalAmount)/NULLIF(SUM(i.TotalBottleQty),0) AS avg_cost
-                        FROM TrVocItem i
-                        JOIN TrVocHead h ON h.TransTypeID=i.TransTypeID AND h.VoucherNo=i.VoucherNo
-                        WHERE h.TransTypeID IN (8,10,14,21,22,27,28,30,31,38,49,53)
-                          AND ISNULL(h.Cancelled,'N')<>'Y'
-                          AND ISNULL(i.FreeItemYN,'N')<>'Y'
-                        GROUP BY i.ItemID
-                    )
-                    SELECT
-                        s.FullName                                          AS salesman,
-                        ROUND(SUM(i.TotalAmount),0)                        AS sale_value,
-                        ROUND(SUM(i.TotalBottleQty * pa.avg_cost),0)       AS cogs,
-                        ROUND(SUM(i.TotalAmount)-SUM(i.TotalBottleQty*pa.avg_cost),0) AS gross_profit,
-                        ROUND(100.0*(SUM(i.TotalAmount)-SUM(i.TotalBottleQty*pa.avg_cost))
-                              /NULLIF(SUM(i.TotalAmount),0),1)             AS gp_pct
+                ("209 — Sale invoice line items: all columns as stored (read exactly what ERP saved)", """
+                    SELECT TOP 30
+                        h.VoucherDate, h.VoucherNo,
+                        i.*,
+                        m.ItemDescription, b.BrandName,
+                        sv.ServiceItemName
                     FROM TrVocItem i
                     JOIN TrVocHead h    ON h.TransTypeID=i.TransTypeID AND h.VoucherNo=i.VoucherNo
                     JOIN MsTransType t  ON t.id_key=h.TransTypeID
-                    JOIN MsSalesmanMaster s ON s.SalesManID=h.SalesManID
-                    LEFT JOIN pur_avg pa ON pa.ItemID=i.ItemID
+                    LEFT JOIN MsItemMaster m        ON m.ItemID=i.ItemID
+                    LEFT JOIN MsBrandMaster b        ON b.BrandID=m.BrandID
+                    LEFT JOIN MsServiceItemMaster sv ON sv.ServiceItemID=i.ServiceItemID
                     WHERE t.ShortName='MS'
                       AND ISNULL(h.Cancelled,'N')<>'Y'
                       AND ISNULL(i.FreeItemYN,'N')<>'Y'
-                      AND h.VoucherDate>='2025-04-01' AND h.VoucherDate<'2026-04-01'
-                    GROUP BY s.FullName
-                    ORDER BY gp_pct DESC
+                      AND h.VoucherDate>='2025-04-01'
+                    ORDER BY h.VoucherDate DESC, i.VoucherNo, i.SerialNo
                 """),
-                ("224 — Items with highest and lowest margin: top 10 best and worst", """
-                    WITH pur_avg AS (
-                        SELECT i.ItemID,
-                               SUM(i.TotalAmount)/NULLIF(SUM(i.TotalBottleQty),0) AS avg_cost
-                        FROM TrVocItem i
-                        JOIN TrVocHead h ON h.TransTypeID=i.TransTypeID AND h.VoucherNo=i.VoucherNo
-                        WHERE h.TransTypeID IN (8,10,14,21,22,27,28,30,31,38,49,53)
-                          AND ISNULL(h.Cancelled,'N')<>'Y'
-                          AND ISNULL(i.FreeItemYN,'N')<>'Y'
-                        GROUP BY i.ItemID
-                    )
-                    SELECT TOP 20
-                        m.ItemDescription, b.BrandName,
-                        m.MrpBottRate,
-                        ROUND(pa.avg_cost,2) AS avg_purchase_cost,
-                        ROUND(m.MrpBottRate - pa.avg_cost, 2) AS margin_per_bottle,
-                        ROUND(100.0*(m.MrpBottRate - pa.avg_cost)
-                              /NULLIF(m.MrpBottRate,0),1)      AS margin_pct
-                    FROM MsItemMaster m
-                    JOIN MsBrandMaster b ON b.BrandID=m.BrandID
-                    JOIN pur_avg pa ON pa.ItemID=m.ItemID
-                    WHERE m.MrpBottRate > 0
-                    ORDER BY margin_pct DESC
-                """),
-                ("225 — Items with NEGATIVE margin (sold below cost) — data quality check", """
-                    WITH pur_avg AS (
-                        SELECT i.ItemID,
-                               SUM(i.TotalAmount)/NULLIF(SUM(i.TotalBottleQty),0) AS avg_cost
-                        FROM TrVocItem i
-                        JOIN TrVocHead h ON h.TransTypeID=i.TransTypeID AND h.VoucherNo=i.VoucherNo
-                        WHERE h.TransTypeID IN (8,10,14,21,22,27,28,30,31,38,49,53)
-                          AND ISNULL(h.Cancelled,'N')<>'Y'
-                          AND ISNULL(i.FreeItemYN,'N')<>'Y'
-                        GROUP BY i.ItemID
-                    ),
-                    sale_avg AS (
-                        SELECT i.ItemID,
-                               SUM(i.TotalAmount)/NULLIF(SUM(i.TotalBottleQty),0) AS avg_sale
-                        FROM TrVocItem i
-                        JOIN TrVocHead h ON h.TransTypeID=i.TransTypeID AND h.VoucherNo=i.VoucherNo
-                        JOIN MsTransType t ON t.id_key=h.TransTypeID
-                        WHERE t.ShortName='MS'
-                          AND ISNULL(h.Cancelled,'N')<>'Y'
-                          AND ISNULL(i.FreeItemYN,'N')<>'Y'
-                          AND h.VoucherDate>='2025-04-01' AND h.VoucherDate<'2026-04-01'
-                        GROUP BY i.ItemID
-                    )
-                    SELECT
-                        m.ItemDescription, b.BrandName,
-                        ROUND(sa.avg_sale,2)  AS avg_sale_rate,
-                        ROUND(pa.avg_cost,2)  AS avg_cost,
-                        ROUND(sa.avg_sale - pa.avg_cost,2) AS margin
-                    FROM sale_avg sa
-                    JOIN pur_avg pa ON pa.ItemID=sa.ItemID
-                    JOIN MsItemMaster m ON m.ItemID=sa.ItemID
-                    JOIN MsBrandMaster b ON b.BrandID=m.BrandID
-                    WHERE sa.avg_sale < pa.avg_cost
-                    ORDER BY (sa.avg_sale - pa.avg_cost)
+                ("210 — Stock valuation as the ERP computes it: read from MsPartyOpening equivalent for stock", """
+                    -- Check if there is a dedicated stock valuation table
+                    SELECT TABLE_NAME
+                    FROM INFORMATION_SCHEMA.TABLES
+                    WHERE TABLE_TYPE='BASE TABLE'
+                      AND (  TABLE_NAME LIKE '%Stock%'
+                          OR TABLE_NAME LIKE '%Valuation%'
+                          OR TABLE_NAME LIKE '%Inventory%'
+                          OR TABLE_NAME LIKE '%Closing%'
+                          OR TABLE_NAME LIKE '%Opening%' )
+                    ORDER BY TABLE_NAME
                 """),
             ]
 
