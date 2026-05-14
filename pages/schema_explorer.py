@@ -705,6 +705,79 @@ def render():
                 GROUP BY b.BrandName, b.BrandID
                 ORDER BY sales DESC
             """),
+            ("AE — TrVocItem column list (all columns + data types)", """
+                SELECT COLUMN_NAME, DATA_TYPE, CHARACTER_MAXIMUM_LENGTH
+                FROM INFORMATION_SCHEMA.COLUMNS
+                WHERE TABLE_NAME = 'TrVocItem'
+                ORDER BY ORDINAL_POSITION
+            """),
+            ("AF — Sample TrVocItem row for a real MS invoice (see ALL column values)", """
+                SELECT TOP 1 i.*
+                FROM TrVocItem i
+                JOIN TrVocHead h ON h.TransTypeID=i.TransTypeID AND h.VoucherNo=i.VoucherNo
+                JOIN MsTransType t ON t.id_key=h.TransTypeID
+                WHERE t.ShortName='MS'
+                  AND ISNULL(h.Cancelled,'N') <> 'Y'
+                  AND ISNULL(i.FreeItemYN,'N') <> 'Y'
+                  AND h.VoucherDate >= '2025-04-01'
+                  AND h.VoucherDate <  '2026-04-01'
+            """),
+            ("AG — Sample DN SALES voucher: TrVocDetail accounting lines (who is DR/CR?)", """
+                SELECT TOP 30
+                    h.VoucherNo, h.VoucherDate, t.TransTypeName,
+                    d.DrCrIndicator, d.Amount, d.PartyID,
+                    CASE WHEN LEFT(d.PartyID,1)='D' THEN 'Customer'
+                         WHEN LEFT(d.PartyID,1)='C' THEN 'Supplier'
+                         WHEN d.PartyID IS NULL OR LTRIM(RTRIM(d.PartyID))='' THEN 'GL/Blank'
+                         ELSE 'Other' END AS party_type,
+                    p.PartyName, d.Narration
+                FROM TrVocDetail d
+                JOIN TrVocHead h ON h.TransTypeID=d.TransTypeID AND h.VoucherNo=d.VoucherNo
+                JOIN MsTransType t ON t.id_key=h.TransTypeID
+                LEFT JOIN MsPartyMaster p ON p.PartyID=d.PartyID
+                WHERE t.ShortName='DN'
+                  AND ISNULL(h.Cancelled,'N') <> 'Y'
+                  AND h.VoucherDate >= '2025-04-01'
+                  AND h.VoucherDate <  '2026-04-01'
+                ORDER BY h.VoucherDate DESC
+            """),
+            ("AH — Does DN have TrVocItem entries (product lines)? Count + sample", """
+                SELECT t.TransTypeName, COUNT(*) AS item_rows,
+                       SUM(i.TotalAmount) AS total_amount
+                FROM TrVocItem i
+                JOIN TrVocHead h ON h.TransTypeID=i.TransTypeID AND h.VoucherNo=i.VoucherNo
+                JOIN MsTransType t ON t.id_key=h.TransTypeID
+                WHERE t.ShortName='DN'
+                  AND ISNULL(h.Cancelled,'N') <> 'Y'
+                  AND h.VoucherDate >= '2025-04-01'
+                  AND h.VoucherDate <  '2026-04-01'
+                GROUP BY t.TransTypeName
+            """),
+            ("AI — DN SALES: which suppliers are debited and which customers are credited?", """
+                SELECT
+                    CASE WHEN LEFT(d.PartyID,1)='D' THEN 'Customer (D%)'
+                         WHEN LEFT(d.PartyID,1)='C' THEN 'Supplier (C%)'
+                         WHEN d.PartyID IS NULL OR LTRIM(RTRIM(d.PartyID))='' THEN 'GL/Blank'
+                         ELSE 'Other' END AS party_type,
+                    d.DrCrIndicator,
+                    COUNT(*) AS rows,
+                    COUNT(DISTINCT d.PartyID) AS distinct_parties,
+                    SUM(d.Amount) AS total_amount
+                FROM TrVocDetail d
+                JOIN TrVocHead h ON h.TransTypeID=d.TransTypeID AND h.VoucherNo=d.VoucherNo
+                JOIN MsTransType t ON t.id_key=h.TransTypeID
+                WHERE t.ShortName='DN'
+                  AND ISNULL(h.Cancelled,'N') <> 'Y'
+                  AND h.VoucherDate >= '2025-04-01'
+                  AND h.VoucherDate <  '2026-04-01'
+                GROUP BY
+                    CASE WHEN LEFT(d.PartyID,1)='D' THEN 'Customer (D%)'
+                         WHEN LEFT(d.PartyID,1)='C' THEN 'Supplier (C%)'
+                         WHEN d.PartyID IS NULL OR LTRIM(RTRIM(d.PartyID))='' THEN 'GL/Blank'
+                         ELSE 'Other' END,
+                    d.DrCrIndicator
+                ORDER BY total_amount DESC
+            """),
             ]
 
             import io, zipfile
