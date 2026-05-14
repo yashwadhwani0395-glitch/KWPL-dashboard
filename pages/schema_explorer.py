@@ -665,6 +665,24 @@ def render():
                       AND h.VoucherDate <  '2026-04-01'
                     ORDER BY h.VoucherDate DESC
                 """),
+                ("26 — BR/CR voucher both sides: what DR/CR entries exist? (find correct collections query)", """
+                    SELECT TOP 5
+                        h.VoucherNo,
+                        CAST(h.VoucherDate AS DATE) AS vdate,
+                        d.DrCrIndicator,
+                        d.PartyID,
+                        LEFT(d.PartyID,1) AS party_prefix,
+                        d.Amount,
+                        d.Narration
+                    FROM TrVocDetail d
+                    JOIN TrVocHead h   ON h.TransTypeID=d.TransTypeID AND h.VoucherNo=d.VoucherNo
+                    JOIN MsTransType t ON t.id_key=h.TransTypeID
+                    WHERE t.ShortName='BR'
+                      AND ISNULL(h.Cancelled,'N') <> 'Y'
+                      AND h.VoucherDate >= '2025-04-01'
+                      AND h.VoucherDate <  '2026-04-01'
+                    ORDER BY h.VoucherDate DESC, h.VoucherNo, d.DrCrIndicator
+                """),
                 ("25 — Any separate TP / Transport Permit tables in the database?", """
                     SELECT TABLE_NAME
                     FROM INFORMATION_SCHEMA.TABLES

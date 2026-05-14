@@ -1,6 +1,6 @@
 import streamlit as st
 from db import query
-from config import NOT_CANCELLED, NOT_FREE, COLORS, brand_case, PRINCIPAL_COLORS
+from config import NOT_CANCELLED, NOT_FREE, COLORS
 from utils import fmt_inr, fmt_qty, month_col, scale_cr
 from components.kpi_cards import kpi_row
 from components.charts import bar_chart, pie_chart
@@ -56,32 +56,37 @@ def render():
                             use_container_width=True, key="sl_monthly")
 
     with col_r:
-        st.subheader("Sales by Principal")
+        st.subheader("Sales by Company")
+        _COMP_COLORS = [
+            "#7B2D8B","#E84855","#F7B731","#28A745","#2E86AB",
+            "#8B4513","#FF6B6B","#4ECDC4","#6C757D","#C0392B",
+        ]
         df_prin = query(f"""
-            SELECT principal, SUM(sales) AS sales FROM (
-                -- MS standard sales (USL, UB, Diageo, wines, etc.)
-                SELECT {brand_case("m")} AS principal, i.TotalAmount AS sales
+            SELECT company, SUM(sales) AS sales FROM (
+                SELECT COALESCE(p.PartyName,'Others') AS company, i.TotalAmount AS sales
                 FROM TrVocHead h
                 JOIN TrVocItem i ON i.TransTypeID=h.TransTypeID AND i.VoucherNo=h.VoucherNo
                 JOIN MsTransType t ON t.id_key=h.TransTypeID
                 JOIN MsItemMaster m ON m.ItemID=i.ItemID
+                LEFT JOIN MsBrandMaster b ON b.BrandID=m.BrandID
+                LEFT JOIN MsPartyMaster p ON p.PartyID=b.CompanyID
                 WHERE t.ShortName='MS' {NOT_CANCELLED} {NOT_FREE} {date_filter}
                 UNION ALL
-                -- BF/JD: billed via "Purchase JD Imported" (TransTypeID=53), not MS
-                SELECT {brand_case("m")} AS principal, i.TotalAmount AS sales
+                SELECT COALESCE(p.PartyName,'Others') AS company, i.TotalAmount AS sales
                 FROM TrVocHead h
                 JOIN TrVocItem i ON i.TransTypeID=h.TransTypeID AND i.VoucherNo=h.VoucherNo
                 JOIN MsItemMaster m ON m.ItemID=i.ItemID
+                LEFT JOIN MsBrandMaster b ON b.BrandID=m.BrandID
+                LEFT JOIN MsPartyMaster p ON p.PartyID=b.CompanyID
                 WHERE h.TransTypeID=53
                   AND ISNULL(h.Cancelled,'N') <> 'Y'
-                  AND ISNULL(i.FreeItemYN,'N') <> 'Y'
-                  {date_filter}
-            ) t GROUP BY principal ORDER BY sales DESC
+                  AND ISNULL(i.FreeItemYN,'N') <> 'Y' {date_filter}
+            ) t GROUP BY company ORDER BY sales DESC
         """)
         if not df_prin.empty:
-            prin_colors = [PRINCIPAL_COLORS.get(p, '#6C757D') for p in df_prin["principal"]]
-            st.plotly_chart(pie_chart(df_prin, "principal", "sales",
-                                     colors=prin_colors),
+            comp_colors = [_COMP_COLORS[i % len(_COMP_COLORS)] for i in range(len(df_prin))]
+            st.plotly_chart(pie_chart(df_prin, "company", "sales",
+                                     colors=comp_colors),
                             use_container_width=True, key="sl_prin_pie")
 
     # ── Daily last 30 days ────────────────────────────────────────────────────
@@ -108,24 +113,18 @@ def render():
 
     with col_l:
         st.subheader("Top 15 Customers")
-        # MS/11+20 are batch vouchers with no individual customer DR entries; LD and
-        # MS/51/26/23 do DR customer D% accounts directly, covering ~38% of sales.
         df_c = query(f"""
             SELECT TOP 15 p.PartyName AS customer,
-                   SUM(v.inv_total) AS sales,
-                   COUNT(DISTINCT CAST(v.TransTypeID AS VARCHAR)+'|'+v.VoucherNo) AS invoices
-            FROM (
-                SELECT h.TransTypeID, h.VoucherNo, SUM(i.TotalAmount) AS inv_total
-                FROM TrVocHead h
-                JOIN TrVocItem i ON i.TransTypeID=h.TransTypeID AND i.VoucherNo=h.VoucherNo
-                JOIN MsTransType t ON t.id_key=h.TransTypeID
-                WHERE (t.ShortName IN ('MS','LD') OR h.TransTypeID=53)
-                  {NOT_CANCELLED} {NOT_FREE} {date_filter}
-                GROUP BY h.TransTypeID, h.VoucherNo
-            ) v
-            JOIN TrVocDetail d ON d.TransTypeID=v.TransTypeID AND d.VoucherNo=v.VoucherNo
+                   SUM(d.Amount) AS sales,
+                   COUNT(DISTINCT CAST(d.TransTypeID AS VARCHAR)+'|'+d.VoucherNo) AS transactions
+            FROM TrVocDetail d
+            JOIN TrVocHead h  ON h.TransTypeID=d.TransTypeID AND h.VoucherNo=d.VoucherNo
+            JOIN MsTransType t ON t.id_key=h.TransTypeID
             JOIN MsPartyMaster p ON p.PartyID=d.PartyID
             WHERE d.DrCrIndicator='D' AND LEFT(d.PartyID,1)='D'
+              AND t.ShortName NOT IN ('BR','CR')
+              AND ISNULL(h.Cancelled,'N') <> 'Y'
+              {date_filter}
             GROUP BY p.PartyName ORDER BY sales DESC
         """)
         if not df_c.empty:
