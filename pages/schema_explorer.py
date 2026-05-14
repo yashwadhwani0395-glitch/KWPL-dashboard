@@ -494,6 +494,135 @@ def render():
                         END
                     ORDER BY excise_amount DESC
                 """),
+                ("18 — RO (Receipt Order) party breakdown: what does it DR/CR?", """
+                    SELECT
+                        d.DrCrIndicator,
+                        CASE
+                            WHEN LEFT(d.PartyID,1)='D' THEN 'Customer (D%)'
+                            WHEN LEFT(d.PartyID,1)='C' THEN 'Creditor (C%)'
+                            WHEN ISNULL(d.PartyID,'')='' THEN 'GL/Blank'
+                            ELSE 'Other'
+                        END AS party_type,
+                        COUNT(*) AS rows,
+                        SUM(d.Amount) AS total_amount
+                    FROM TrVocDetail d
+                    JOIN TrVocHead h ON h.TransTypeID=d.TransTypeID AND h.VoucherNo=d.VoucherNo
+                    WHERE h.TransTypeID=54
+                      AND ISNULL(h.Cancelled,'N') <> 'Y'
+                      AND h.VoucherDate >= '2025-04-01'
+                      AND h.VoucherDate <  '2026-04-01'
+                    GROUP BY d.DrCrIndicator,
+                        CASE
+                            WHEN LEFT(d.PartyID,1)='D' THEN 'Customer (D%)'
+                            WHEN LEFT(d.PartyID,1)='C' THEN 'Creditor (C%)'
+                            WHEN ISNULL(d.PartyID,'')='' THEN 'GL/Blank'
+                            ELSE 'Other'
+                        END
+                    ORDER BY d.DrCrIndicator, total_amount DESC
+                """),
+                ("19 — ALL TransTypes that DR Customer D% accounts (complete outward billing picture)", """
+                    SELECT
+                        t.ShortName, t.TransTypeName, t.id_key AS TransTypeID,
+                        SUM(d.Amount)  AS dr_to_customers,
+                        COUNT(DISTINCT CAST(h.TransTypeID AS VARCHAR)+'|'+h.VoucherNo) AS vouchers
+                    FROM TrVocDetail d
+                    JOIN TrVocHead h   ON h.TransTypeID=d.TransTypeID AND h.VoucherNo=d.VoucherNo
+                    JOIN MsTransType t ON t.id_key=h.TransTypeID
+                    WHERE ISNULL(h.Cancelled,'N') <> 'Y'
+                      AND d.DrCrIndicator='D'
+                      AND LEFT(d.PartyID,1)='D'
+                      AND h.VoucherDate >= '2025-04-01'
+                      AND h.VoucherDate <  '2026-04-01'
+                    GROUP BY t.ShortName, t.TransTypeName, t.id_key
+                    ORDER BY dr_to_customers DESC
+                """),
+                ("20 — Principal-wise total billing to customers across ALL transaction types FY25-26", """
+                    SELECT principal, SUM(total_amount) AS total_billed, SUM(total_bottles) AS bottles
+                    FROM (
+                        SELECT
+                            CASE
+                                WHEN m.BrandID IN (277,278,279,284,286,292,293,294,295,296,
+                                    297,305,342,345,346,371,372,373,375,376,379,388,396,401,
+                                    417,437,445,458,568,266,269,270,271,273,274,275,276,353,
+                                    354,355,356,368,419,432,561,563,565,287,382,394,522,523,
+                                    282,283,288,289,290,298,330,335,389,428,429,433,446,390,
+                                    391,392,434,435,436,535,280,481,542,567,285,380,430,475,
+                                    476,541,560,224,281,291,381,463,464,482,589,590,593)
+                                    THEN 'Diageo'
+                                WHEN m.BrandID IN (213,217,223,555,556,559,569,570,582,591,
+                                    594,218,360,323,487,90,110,450,215,225,331,332,272,333,
+                                    358,265,267,334,477)
+                                    THEN 'United Spirits'
+                                WHEN m.BrandID IN (78,80,109,126,189,329,483,486,557,586,595,
+                                    84,112,214,327,344,378,479,478,573,574,571,572,38,219,
+                                    448,552,566,443,558,77,554)
+                                    THEN 'United Breweries'
+                                WHEN m.BrandID IN (576,577,578,579,580,583,585,588,592)
+                                    THEN 'Brown-Forman'
+                                ELSE 'Others'
+                            END AS principal,
+                            vi.TotalAmount AS total_amount,
+                            vi.TotalBottleQty AS total_bottles
+                        FROM TrVocItem vi
+                        JOIN TrVocHead h    ON h.TransTypeID=vi.TransTypeID AND h.VoucherNo=vi.VoucherNo
+                        JOIN MsItemMaster m ON m.ItemID=vi.ItemID
+                        WHERE ISNULL(h.Cancelled,'N') <> 'Y'
+                          AND ISNULL(vi.FreeItemYN,'N') <> 'Y'
+                          AND h.VoucherDate >= '2025-04-01'
+                          AND h.VoucherDate <  '2026-04-01'
+                    ) x
+                    GROUP BY principal
+                    ORDER BY total_billed DESC
+                """),
+                ("21 — Complete sales picture by TransType: which types DR customers AND have TrVocItem?", """
+                    SELECT
+                        t.ShortName, t.TransTypeName, t.id_key AS TransTypeID,
+                        SUM(vi.TotalAmount)    AS item_total,
+                        SUM(vi.TotalBottleQty) AS item_bottles,
+                        COUNT(DISTINCT CAST(vi.TransTypeID AS VARCHAR)+'|'+vi.VoucherNo) AS vouchers
+                    FROM TrVocItem vi
+                    JOIN TrVocHead h   ON h.TransTypeID=vi.TransTypeID AND h.VoucherNo=vi.VoucherNo
+                    JOIN MsTransType t ON t.id_key=h.TransTypeID
+                    WHERE ISNULL(h.Cancelled,'N') <> 'Y'
+                      AND ISNULL(vi.FreeItemYN,'N') <> 'Y'
+                      AND h.VoucherDate >= '2025-04-01'
+                      AND h.VoucherDate <  '2026-04-01'
+                      AND EXISTS (
+                          SELECT 1 FROM TrVocDetail d2
+                          WHERE d2.TransTypeID=h.TransTypeID AND d2.VoucherNo=h.VoucherNo
+                            AND d2.DrCrIndicator='D' AND LEFT(d2.PartyID,1)='D'
+                      )
+                    GROUP BY t.ShortName, t.TransTypeName, t.id_key
+                    ORDER BY item_total DESC
+                """),
+                ("22 — DN (Debit Note) full accounting breakdown: what exactly does each DR/CR?", """
+                    SELECT
+                        t.ShortName, t.TransTypeName,
+                        d.DrCrIndicator,
+                        CASE
+                            WHEN LEFT(d.PartyID,1)='D' THEN 'Customer (D%)'
+                            WHEN LEFT(d.PartyID,1)='C' THEN 'Creditor (C%)'
+                            WHEN ISNULL(d.PartyID,'')='' THEN 'GL/Blank'
+                            ELSE 'Other'
+                        END AS party_type,
+                        COUNT(*) AS rows,
+                        SUM(d.Amount) AS total_amount
+                    FROM TrVocDetail d
+                    JOIN TrVocHead h   ON h.TransTypeID=d.TransTypeID AND h.VoucherNo=d.VoucherNo
+                    JOIN MsTransType t ON t.id_key=h.TransTypeID
+                    WHERE t.ShortName='DN'
+                      AND ISNULL(h.Cancelled,'N') <> 'Y'
+                      AND h.VoucherDate >= '2025-04-01'
+                      AND h.VoucherDate <  '2026-04-01'
+                    GROUP BY t.ShortName, t.TransTypeName, d.DrCrIndicator,
+                        CASE
+                            WHEN LEFT(d.PartyID,1)='D' THEN 'Customer (D%)'
+                            WHEN LEFT(d.PartyID,1)='C' THEN 'Creditor (C%)'
+                            WHEN ISNULL(d.PartyID,'')='' THEN 'GL/Blank'
+                            ELSE 'Other'
+                        END
+                    ORDER BY t.TransTypeName, d.DrCrIndicator, total_amount DESC
+                """),
                 ("15 — LD LOAD party breakdown: does it debit customers (= customer billing)?", """
                     SELECT
                         d.DrCrIndicator,
