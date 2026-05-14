@@ -4020,6 +4020,1090 @@ def render():
                           OR TABLE_NAME LIKE '%Opening%' )
                     ORDER BY TABLE_NAME
                 """),
+
+                # ════════════════════════════════════════════════════════════
+                # BLOCK Q — Chart of Accounts / Account Group Hierarchy
+                # ════════════════════════════════════════════════════════════
+                ("211 — All tables whose name contains Account / Group / Head / Ledger", """
+                    SELECT TABLE_NAME,
+                           (SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS
+                            WHERE TABLE_NAME = t.TABLE_NAME) AS col_count
+                    FROM INFORMATION_SCHEMA.TABLES t
+                    WHERE TABLE_TYPE='BASE TABLE'
+                      AND (TABLE_NAME LIKE '%Account%'
+                           OR TABLE_NAME LIKE '%Group%'
+                           OR TABLE_NAME LIKE '%Head%'
+                           OR TABLE_NAME LIKE '%Ledger%'
+                           OR TABLE_NAME LIKE '%COA%'
+                           OR TABLE_NAME LIKE '%Chart%')
+                    ORDER BY TABLE_NAME
+                """),
+
+                ("212 — MsAccountHead: all columns + every row (account master)", """
+                    SELECT * FROM MsAccountHead ORDER BY 1
+                """),
+
+                ("213 — Account group hierarchy: does MsAccountHead have a parent/group column?", """
+                    SELECT COLUMN_NAME, DATA_TYPE, IS_NULLABLE
+                    FROM INFORMATION_SCHEMA.COLUMNS
+                    WHERE TABLE_NAME = 'MsAccountHead'
+                    ORDER BY ORDINAL_POSITION
+                """),
+
+                ("214 — MsGroupMaster or equivalent: find any group/nature hierarchy table", """
+                    SELECT TABLE_NAME
+                    FROM INFORMATION_SCHEMA.TABLES
+                    WHERE TABLE_TYPE='BASE TABLE'
+                      AND (TABLE_NAME LIKE '%MsGroup%'
+                           OR TABLE_NAME LIKE '%AccountGroup%'
+                           OR TABLE_NAME LIKE '%AccGroup%'
+                           OR TABLE_NAME LIKE '%NatureMaster%'
+                           OR TABLE_NAME LIKE '%AccountNature%')
+                    ORDER BY TABLE_NAME
+                """),
+
+                ("215 — All distinct account types / natures in MsAccountHead (Nature/Type/Category col)", """
+                    SELECT COLUMN_NAME
+                    FROM INFORMATION_SCHEMA.COLUMNS
+                    WHERE TABLE_NAME='MsAccountHead'
+                      AND (COLUMN_NAME LIKE '%Nature%'
+                           OR COLUMN_NAME LIKE '%Type%'
+                           OR COLUMN_NAME LIKE '%Category%'
+                           OR COLUMN_NAME LIKE '%Group%'
+                           OR COLUMN_NAME LIKE '%Parent%'
+                           OR COLUMN_NAME LIKE '%Head%')
+                    ORDER BY ORDINAL_POSITION
+                """),
+
+                ("216 — TrVocDetail: all distinct AccountID / PartyID patterns (which accounts get hit)", """
+                    SELECT TOP 200
+                        d.PartyID,
+                        LEFT(d.PartyID,1) AS prefix,
+                        d.DrCrIndicator,
+                        t.ShortName,
+                        COUNT(*) AS entries
+                    FROM TrVocDetail d
+                    JOIN TrVocHead h ON h.TransTypeID=d.TransTypeID AND h.VoucherNo=d.VoucherNo
+                    JOIN MsTransType t ON t.id_key=h.TransTypeID
+                    WHERE h.VoucherDate >= '2025-04-01' AND h.VoucherDate < '2026-04-01'
+                    GROUP BY d.PartyID, LEFT(d.PartyID,1), d.DrCrIndicator, t.ShortName
+                    ORDER BY entries DESC
+                """),
+
+                # ════════════════════════════════════════════════════════════
+                # BLOCK R — ERP Configuration & Settings Tables
+                # ════════════════════════════════════════════════════════════
+                ("217 — All settings / config / company tables", """
+                    SELECT TABLE_NAME,
+                           (SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS
+                            WHERE TABLE_NAME = t.TABLE_NAME) AS col_count
+                    FROM INFORMATION_SCHEMA.TABLES t
+                    WHERE TABLE_TYPE='BASE TABLE'
+                      AND (TABLE_NAME LIKE '%Setting%'
+                           OR TABLE_NAME LIKE '%Config%'
+                           OR TABLE_NAME LIKE '%Company%'
+                           OR TABLE_NAME LIKE '%Parameter%'
+                           OR TABLE_NAME LIKE '%Option%'
+                           OR TABLE_NAME LIKE '%Control%'
+                           OR TABLE_NAME LIKE '%MsSystem%'
+                           OR TABLE_NAME LIKE '%MsSetup%')
+                    ORDER BY TABLE_NAME
+                """),
+
+                ("218 — Company master: dump every row", """
+                    SELECT TABLE_NAME
+                    FROM INFORMATION_SCHEMA.TABLES
+                    WHERE TABLE_TYPE='BASE TABLE'
+                      AND (TABLE_NAME LIKE '%Company%' OR TABLE_NAME LIKE '%MsOrg%'
+                           OR TABLE_NAME LIKE '%MsFirm%')
+                    ORDER BY TABLE_NAME
+                """),
+
+                ("219 — Financial year / period definition table", """
+                    SELECT TABLE_NAME
+                    FROM INFORMATION_SCHEMA.TABLES
+                    WHERE TABLE_TYPE='BASE TABLE'
+                      AND (TABLE_NAME LIKE '%FinYear%'
+                           OR TABLE_NAME LIKE '%FYear%'
+                           OR TABLE_NAME LIKE '%Period%'
+                           OR TABLE_NAME LIKE '%Year%')
+                    ORDER BY TABLE_NAME
+                """),
+
+                ("220 — Voucher number series / prefix configuration", """
+                    SELECT TABLE_NAME
+                    FROM INFORMATION_SCHEMA.TABLES
+                    WHERE TABLE_TYPE='BASE TABLE'
+                      AND (TABLE_NAME LIKE '%Series%'
+                           OR TABLE_NAME LIKE '%Prefix%'
+                           OR TABLE_NAME LIKE '%Numbering%'
+                           OR TABLE_NAME LIKE '%VoucherSeries%'
+                           OR TABLE_NAME LIKE '%AutoNumber%')
+                    ORDER BY TABLE_NAME
+                """),
+
+                ("221 — All tables with 'Rate' OR 'Tax' OR 'Duty' in name", """
+                    SELECT TABLE_NAME
+                    FROM INFORMATION_SCHEMA.TABLES
+                    WHERE TABLE_TYPE='BASE TABLE'
+                      AND (TABLE_NAME LIKE '%Rate%'
+                           OR TABLE_NAME LIKE '%Tax%'
+                           OR TABLE_NAME LIKE '%Duty%'
+                           OR TABLE_NAME LIKE '%TCS%'
+                           OR TABLE_NAME LIKE '%GST%'
+                           OR TABLE_NAME LIKE '%Excise%')
+                    ORDER BY TABLE_NAME
+                """),
+
+                # ════════════════════════════════════════════════════════════
+                # BLOCK S — Complete Voucher Anatomy (head + item + detail)
+                # One real voucher of each type — every column as-stored
+                # ════════════════════════════════════════════════════════════
+                ("222 — Full anatomy: most recent MS sale voucher (TrVocHead)", """
+                    SELECT TOP 1 h.*
+                    FROM TrVocHead h
+                    JOIN MsTransType t ON t.id_key=h.TransTypeID
+                    WHERE t.ShortName='MS'
+                      AND ISNULL(h.Cancelled,'N') <> 'Y'
+                      AND h.VoucherDate >= '2025-04-01'
+                    ORDER BY h.VoucherDate DESC, h.VoucherNo DESC
+                """),
+
+                ("223 — Full anatomy: most recent MS sale voucher (TrVocItem — all lines)", """
+                    SELECT i.*
+                    FROM TrVocItem i
+                    JOIN TrVocHead h ON h.TransTypeID=i.TransTypeID AND h.VoucherNo=i.VoucherNo
+                    JOIN MsTransType t ON t.id_key=h.TransTypeID
+                    WHERE t.ShortName='MS'
+                      AND ISNULL(h.Cancelled,'N') <> 'Y'
+                      AND h.VoucherDate >= '2025-04-01'
+                      AND h.VoucherDate = (
+                          SELECT MAX(h2.VoucherDate)
+                          FROM TrVocHead h2
+                          JOIN MsTransType t2 ON t2.id_key=h2.TransTypeID
+                          WHERE t2.ShortName='MS' AND ISNULL(h2.Cancelled,'N') <> 'Y'
+                            AND h2.VoucherDate >= '2025-04-01'
+                      )
+                    ORDER BY i.SrNo
+                """),
+
+                ("224 — Full anatomy: most recent MS sale voucher (TrVocDetail — all debit/credit legs)", """
+                    SELECT d.*
+                    FROM TrVocDetail d
+                    JOIN TrVocHead h ON h.TransTypeID=d.TransTypeID AND h.VoucherNo=d.VoucherNo
+                    JOIN MsTransType t ON t.id_key=h.TransTypeID
+                    WHERE t.ShortName='MS'
+                      AND ISNULL(h.Cancelled,'N') <> 'Y'
+                      AND h.VoucherDate >= '2025-04-01'
+                      AND h.VoucherDate = (
+                          SELECT MAX(h2.VoucherDate)
+                          FROM TrVocHead h2
+                          JOIN MsTransType t2 ON t2.id_key=h2.TransTypeID
+                          WHERE t2.ShortName='MS' AND ISNULL(h2.Cancelled,'N') <> 'Y'
+                            AND h2.VoucherDate >= '2025-04-01'
+                      )
+                    ORDER BY d.SrNo
+                """),
+
+                ("225 — Full anatomy: most recent PU purchase (TrVocHead + both detail tables)", """
+                    SELECT TOP 1 h.*
+                    FROM TrVocHead h
+                    JOIN MsTransType t ON t.id_key=h.TransTypeID
+                    WHERE t.ShortName='PU'
+                      AND ISNULL(h.Cancelled,'N') <> 'Y'
+                      AND h.VoucherDate >= '2025-04-01'
+                    ORDER BY h.VoucherDate DESC, h.VoucherNo DESC
+                """),
+
+                ("226 — Full anatomy: most recent PU purchase (TrVocItem)", """
+                    SELECT i.*
+                    FROM TrVocItem i
+                    JOIN TrVocHead h ON h.TransTypeID=i.TransTypeID AND h.VoucherNo=i.VoucherNo
+                    JOIN MsTransType t ON t.id_key=h.TransTypeID
+                    WHERE t.ShortName='PU'
+                      AND ISNULL(h.Cancelled,'N') <> 'Y'
+                      AND h.VoucherDate >= '2025-04-01'
+                      AND h.VoucherDate = (
+                          SELECT MAX(h2.VoucherDate)
+                          FROM TrVocHead h2
+                          JOIN MsTransType t2 ON t2.id_key=h2.TransTypeID
+                          WHERE t2.ShortName='PU' AND ISNULL(h2.Cancelled,'N') <> 'Y'
+                            AND h2.VoucherDate >= '2025-04-01'
+                      )
+                    ORDER BY i.SrNo
+                """),
+
+                ("227 — Full anatomy: most recent PU purchase (TrVocDetail)", """
+                    SELECT d.*
+                    FROM TrVocDetail d
+                    JOIN TrVocHead h ON h.TransTypeID=d.TransTypeID AND h.VoucherNo=d.VoucherNo
+                    JOIN MsTransType t ON t.id_key=h.TransTypeID
+                    WHERE t.ShortName='PU'
+                      AND ISNULL(h.Cancelled,'N') <> 'Y'
+                      AND h.VoucherDate >= '2025-04-01'
+                      AND h.VoucherDate = (
+                          SELECT MAX(h2.VoucherDate)
+                          FROM TrVocHead h2
+                          JOIN MsTransType t2 ON t2.id_key=h2.TransTypeID
+                          WHERE t2.ShortName='PU' AND ISNULL(h2.Cancelled,'N') <> 'Y'
+                            AND h2.VoucherDate >= '2025-04-01'
+                      )
+                    ORDER BY d.SrNo
+                """),
+
+                ("228 — Full anatomy: most recent BP with TrVocItem (excise payment)", """
+                    SELECT TOP 1 h.*
+                    FROM TrVocHead h
+                    JOIN MsTransType t ON t.id_key=h.TransTypeID
+                    WHERE t.ShortName='BP'
+                      AND ISNULL(h.Cancelled,'N') <> 'Y'
+                      AND h.VoucherDate >= '2025-04-01'
+                      AND EXISTS (SELECT 1 FROM TrVocItem i
+                                  WHERE i.TransTypeID=h.TransTypeID AND i.VoucherNo=h.VoucherNo)
+                    ORDER BY h.VoucherDate DESC
+                """),
+
+                ("229 — TrVocItem for that BP with items (excise payment item rows)", """
+                    SELECT i.*
+                    FROM TrVocItem i
+                    JOIN TrVocHead h ON h.TransTypeID=i.TransTypeID AND h.VoucherNo=i.VoucherNo
+                    JOIN MsTransType t ON t.id_key=h.TransTypeID
+                    WHERE t.ShortName='BP'
+                      AND ISNULL(h.Cancelled,'N') <> 'Y'
+                      AND h.VoucherDate >= '2025-04-01'
+                      AND h.VoucherDate = (
+                          SELECT MAX(h2.VoucherDate) FROM TrVocHead h2
+                          JOIN MsTransType t2 ON t2.id_key=h2.TransTypeID
+                          WHERE t2.ShortName='BP' AND ISNULL(h2.Cancelled,'N') <> 'Y'
+                            AND h2.VoucherDate >= '2025-04-01'
+                            AND EXISTS (SELECT 1 FROM TrVocItem ix
+                                        WHERE ix.TransTypeID=h2.TransTypeID AND ix.VoucherNo=h2.VoucherNo)
+                      )
+                    ORDER BY i.SrNo
+                """),
+
+                ("230 — Full anatomy: most recent BP without TrVocItem (pure expense payment)", """
+                    SELECT TOP 1 h.*
+                    FROM TrVocHead h
+                    JOIN MsTransType t ON t.id_key=h.TransTypeID
+                    WHERE t.ShortName='BP'
+                      AND ISNULL(h.Cancelled,'N') <> 'Y'
+                      AND h.VoucherDate >= '2025-04-01'
+                      AND NOT EXISTS (SELECT 1 FROM TrVocItem i
+                                      WHERE i.TransTypeID=h.TransTypeID AND i.VoucherNo=h.VoucherNo)
+                    ORDER BY h.VoucherDate DESC
+                """),
+
+                ("231 — TrVocDetail for that pure expense BP (all legs)", """
+                    SELECT d.*
+                    FROM TrVocDetail d
+                    JOIN TrVocHead h ON h.TransTypeID=d.TransTypeID AND h.VoucherNo=d.VoucherNo
+                    JOIN MsTransType t ON t.id_key=h.TransTypeID
+                    WHERE t.ShortName='BP'
+                      AND ISNULL(h.Cancelled,'N') <> 'Y'
+                      AND h.VoucherDate >= '2025-04-01'
+                      AND NOT EXISTS (SELECT 1 FROM TrVocItem i
+                                      WHERE i.TransTypeID=h.TransTypeID AND i.VoucherNo=h.VoucherNo)
+                      AND h.VoucherDate = (
+                          SELECT MAX(h2.VoucherDate) FROM TrVocHead h2
+                          JOIN MsTransType t2 ON t2.id_key=h2.TransTypeID
+                          WHERE t2.ShortName='BP' AND ISNULL(h2.Cancelled,'N') <> 'Y'
+                            AND h2.VoucherDate >= '2025-04-01'
+                            AND NOT EXISTS (SELECT 1 FROM TrVocItem ix
+                                            WHERE ix.TransTypeID=h2.TransTypeID AND ix.VoucherNo=h2.VoucherNo)
+                      )
+                    ORDER BY d.SrNo
+                """),
+
+                ("232 — Full anatomy: most recent BR bank receipt (TrVocHead + TrVocDetail)", """
+                    SELECT TOP 1 h.*
+                    FROM TrVocHead h
+                    JOIN MsTransType t ON t.id_key=h.TransTypeID
+                    WHERE t.ShortName='BR'
+                      AND ISNULL(h.Cancelled,'N') <> 'Y'
+                      AND h.VoucherDate >= '2025-04-01'
+                    ORDER BY h.VoucherDate DESC
+                """),
+
+                ("233 — TrVocDetail for most recent BR (how customer debit and bank credit appear)", """
+                    SELECT d.*
+                    FROM TrVocDetail d
+                    JOIN TrVocHead h ON h.TransTypeID=d.TransTypeID AND h.VoucherNo=d.VoucherNo
+                    JOIN MsTransType t ON t.id_key=h.TransTypeID
+                    WHERE t.ShortName='BR'
+                      AND ISNULL(h.Cancelled,'N') <> 'Y'
+                      AND h.VoucherDate = (
+                          SELECT MAX(h2.VoucherDate) FROM TrVocHead h2
+                          JOIN MsTransType t2 ON t2.id_key=h2.TransTypeID
+                          WHERE t2.ShortName='BR' AND ISNULL(h2.Cancelled,'N') <> 'Y'
+                            AND h2.VoucherDate >= '2025-04-01'
+                      )
+                    ORDER BY d.SrNo
+                """),
+
+                ("234 — Full anatomy: most recent CN credit note (TrVocHead)", """
+                    SELECT TOP 1 h.*
+                    FROM TrVocHead h
+                    JOIN MsTransType t ON t.id_key=h.TransTypeID
+                    WHERE t.ShortName='CN'
+                      AND ISNULL(h.Cancelled,'N') <> 'Y'
+                      AND h.VoucherDate >= '2025-04-01'
+                    ORDER BY h.VoucherDate DESC
+                """),
+
+                ("235 — TrVocItem for most recent CN (does stock reverse?)", """
+                    SELECT i.*
+                    FROM TrVocItem i
+                    JOIN TrVocHead h ON h.TransTypeID=i.TransTypeID AND h.VoucherNo=i.VoucherNo
+                    JOIN MsTransType t ON t.id_key=h.TransTypeID
+                    WHERE t.ShortName='CN'
+                      AND ISNULL(h.Cancelled,'N') <> 'Y'
+                      AND h.VoucherDate >= '2025-04-01'
+                    ORDER BY h.VoucherDate DESC, i.SrNo
+                """),
+
+                ("236 — TrVocDetail for most recent CN (all accounting legs)", """
+                    SELECT d.*
+                    FROM TrVocDetail d
+                    JOIN TrVocHead h ON h.TransTypeID=d.TransTypeID AND h.VoucherNo=d.VoucherNo
+                    JOIN MsTransType t ON t.id_key=h.TransTypeID
+                    WHERE t.ShortName='CN'
+                      AND ISNULL(h.Cancelled,'N') <> 'Y'
+                      AND h.VoucherDate = (
+                          SELECT MAX(h2.VoucherDate) FROM TrVocHead h2
+                          JOIN MsTransType t2 ON t2.id_key=h2.TransTypeID
+                          WHERE t2.ShortName='CN' AND ISNULL(h2.Cancelled,'N') <> 'Y'
+                            AND h2.VoucherDate >= '2025-04-01'
+                      )
+                    ORDER BY d.SrNo
+                """),
+
+                ("237 — Full anatomy: most recent DN debit note (all three tables)", """
+                    SELECT TOP 1 h.*
+                    FROM TrVocHead h
+                    JOIN MsTransType t ON t.id_key=h.TransTypeID
+                    WHERE t.ShortName='DN'
+                      AND ISNULL(h.Cancelled,'N') <> 'Y'
+                      AND h.VoucherDate >= '2025-04-01'
+                    ORDER BY h.VoucherDate DESC
+                """),
+
+                ("238 — TrVocDetail for most recent DN (shows who is debited/credited)", """
+                    SELECT d.*
+                    FROM TrVocDetail d
+                    JOIN TrVocHead h ON h.TransTypeID=d.TransTypeID AND h.VoucherNo=d.VoucherNo
+                    JOIN MsTransType t ON t.id_key=h.TransTypeID
+                    WHERE t.ShortName='DN'
+                      AND ISNULL(h.Cancelled,'N') <> 'Y'
+                      AND h.VoucherDate = (
+                          SELECT MAX(h2.VoucherDate) FROM TrVocHead h2
+                          JOIN MsTransType t2 ON t2.id_key=h2.TransTypeID
+                          WHERE t2.ShortName='DN' AND ISNULL(h2.Cancelled,'N') <> 'Y'
+                            AND h2.VoucherDate >= '2025-04-01'
+                      )
+                    ORDER BY d.SrNo
+                """),
+
+                ("239 — Full anatomy: most recent JV journal voucher", """
+                    SELECT TOP 1 h.*, d.SrNo, d.PartyID, d.DrCrIndicator, d.Amount, d.Narration
+                    FROM TrVocHead h
+                    JOIN TrVocDetail d ON d.TransTypeID=h.TransTypeID AND d.VoucherNo=h.VoucherNo
+                    JOIN MsTransType t ON t.id_key=h.TransTypeID
+                    WHERE t.ShortName='JV'
+                      AND ISNULL(h.Cancelled,'N') <> 'Y'
+                      AND h.VoucherDate >= '2025-04-01'
+                    ORDER BY h.VoucherDate DESC
+                """),
+
+                # ════════════════════════════════════════════════════════════
+                # BLOCK T — Bill-Wise Outstanding / Reference Allocation
+                # ════════════════════════════════════════════════════════════
+                ("240 — TrVocDetail: all columns including Reference / BillNo / AgainstVoucher", """
+                    SELECT COLUMN_NAME, DATA_TYPE, IS_NULLABLE
+                    FROM INFORMATION_SCHEMA.COLUMNS
+                    WHERE TABLE_NAME='TrVocDetail'
+                    ORDER BY ORDINAL_POSITION
+                """),
+
+                ("241 — TrVocDetail: distinct values in any Reference / BillNo column (top 30)", """
+                    SELECT TOP 30 *
+                    FROM TrVocDetail
+                    WHERE TransTypeID IN (SELECT id_key FROM MsTransType WHERE ShortName IN ('BR','CR'))
+                      AND DrCrIndicator='D'
+                    ORDER BY 1 DESC
+                """),
+
+                ("242 — All tables with Allocation / Adjust / Settlement / BillRef in name", """
+                    SELECT TABLE_NAME
+                    FROM INFORMATION_SCHEMA.TABLES
+                    WHERE TABLE_TYPE='BASE TABLE'
+                      AND (TABLE_NAME LIKE '%Alloc%'
+                           OR TABLE_NAME LIKE '%Adjust%'
+                           OR TABLE_NAME LIKE '%Settle%'
+                           OR TABLE_NAME LIKE '%BillRef%'
+                           OR TABLE_NAME LIKE '%Against%'
+                           OR TABLE_NAME LIKE '%Receipt%'
+                           OR TABLE_NAME LIKE '%Payment%')
+                    ORDER BY TABLE_NAME
+                """),
+
+                ("243 — TrVocHead: all columns (checking for DueDate, CreditDays, RefNo)", """
+                    SELECT COLUMN_NAME, DATA_TYPE, IS_NULLABLE
+                    FROM INFORMATION_SCHEMA.COLUMNS
+                    WHERE TABLE_NAME='TrVocHead'
+                    ORDER BY ORDINAL_POSITION
+                """),
+
+                ("244 — MS vouchers: show DueDate / CreditDays if those columns exist", """
+                    SELECT TOP 20
+                        h.VoucherNo, h.VoucherDate,
+                        p.PartyName,
+                        h.TotalAmount
+                    FROM TrVocHead h
+                    JOIN MsTransType t ON t.id_key=h.TransTypeID
+                    LEFT JOIN MsPartyMaster p ON p.PartyID = h.PartyID
+                    WHERE t.ShortName='MS'
+                      AND ISNULL(h.Cancelled,'N') <> 'Y'
+                      AND h.VoucherDate >= '2025-04-01'
+                    ORDER BY h.VoucherDate DESC
+                """),
+
+                ("245 — MsPartyMaster: columns related to credit limit / credit days", """
+                    SELECT COLUMN_NAME, DATA_TYPE
+                    FROM INFORMATION_SCHEMA.COLUMNS
+                    WHERE TABLE_NAME='MsPartyMaster'
+                      AND (COLUMN_NAME LIKE '%Credit%'
+                           OR COLUMN_NAME LIKE '%Limit%'
+                           OR COLUMN_NAME LIKE '%Days%'
+                           OR COLUMN_NAME LIKE '%Due%')
+                    ORDER BY ORDINAL_POSITION
+                """),
+
+                ("246 — MsPartyMaster: sample row for a D% customer (all columns)", """
+                    SELECT TOP 1 * FROM MsPartyMaster
+                    WHERE LEFT(PartyID,1)='D'
+                    ORDER BY PartyID
+                """),
+
+                ("247 — MsPartyMaster: sample row for a C% supplier (all columns)", """
+                    SELECT TOP 1 * FROM MsPartyMaster
+                    WHERE LEFT(PartyID,1)='C'
+                    ORDER BY PartyID
+                """),
+
+                ("248 — MsPartyMaster: sample row for a GL/expense account (not D or C prefix)", """
+                    SELECT TOP 5 * FROM MsPartyMaster
+                    WHERE LEFT(PartyID,1) NOT IN ('D','C')
+                    ORDER BY PartyID
+                """),
+
+                # ════════════════════════════════════════════════════════════
+                # BLOCK U — Tax Rate Storage (TCS, Excise, Duties)
+                # ════════════════════════════════════════════════════════════
+                ("249 — MsServiceItemMaster: all columns + all rows", """
+                    SELECT COLUMN_NAME, DATA_TYPE, IS_NULLABLE
+                    FROM INFORMATION_SCHEMA.COLUMNS
+                    WHERE TABLE_NAME='MsServiceItemMaster'
+                    ORDER BY ORDINAL_POSITION
+                """),
+
+                ("250 — MsServiceItemMaster: full data dump", """
+                    SELECT * FROM MsServiceItemMaster ORDER BY 1
+                """),
+
+                ("251 — Service item rows on MS sale invoices (excise, TCS, handling, discount)", """
+                    SELECT TOP 50
+                        h.VoucherNo, h.VoucherDate,
+                        i.SrNo, i.ItemID, i.ItemDescription,
+                        i.TotalAmount, i.TotalBottleQty,
+                        i.FreeItemYN
+                    FROM TrVocItem i
+                    JOIN TrVocHead h ON h.TransTypeID=i.TransTypeID AND h.VoucherNo=i.VoucherNo
+                    JOIN MsTransType t ON t.id_key=h.TransTypeID
+                    WHERE t.ShortName='MS'
+                      AND ISNULL(h.Cancelled,'N') <> 'Y'
+                      AND h.VoucherDate >= '2025-04-01'
+                      AND (i.ItemID NOT IN (SELECT ItemID FROM MsItemMaster)
+                           OR i.TotalBottleQty = 0
+                           OR i.TotalAmount < 0)
+                    ORDER BY h.VoucherDate DESC, h.VoucherNo DESC, i.SrNo
+                """),
+
+                ("252 — TrVocItem: all service-type rows (zero bottle qty or negative amount = charges)", """
+                    SELECT TOP 100
+                        t.ShortName, i.ItemID, i.ItemDescription,
+                        i.TotalAmount, i.TotalBottleQty, i.FreeItemYN,
+                        COUNT(*) OVER (PARTITION BY i.ItemID) AS occurrences
+                    FROM TrVocItem i
+                    JOIN TrVocHead h ON h.TransTypeID=i.TransTypeID AND h.VoucherNo=i.VoucherNo
+                    JOIN MsTransType t ON t.id_key=h.TransTypeID
+                    WHERE h.VoucherDate >= '2025-04-01'
+                      AND h.VoucherDate < '2026-04-01'
+                      AND ISNULL(h.Cancelled,'N') <> 'Y'
+                      AND (i.TotalBottleQty = 0 OR i.TotalBottleQty IS NULL)
+                    ORDER BY occurrences DESC
+                """),
+
+                ("253 — MsItemMaster: all rate / price / duty / tax columns", """
+                    SELECT COLUMN_NAME, DATA_TYPE, NUMERIC_PRECISION, NUMERIC_SCALE
+                    FROM INFORMATION_SCHEMA.COLUMNS
+                    WHERE TABLE_NAME='MsItemMaster'
+                      AND (COLUMN_NAME LIKE '%Rate%'
+                           OR COLUMN_NAME LIKE '%Price%'
+                           OR COLUMN_NAME LIKE '%MRP%'
+                           OR COLUMN_NAME LIKE '%Duty%'
+                           OR COLUMN_NAME LIKE '%Tax%'
+                           OR COLUMN_NAME LIKE '%TCS%'
+                           OR COLUMN_NAME LIKE '%Excise%'
+                           OR COLUMN_NAME LIKE '%Val%'
+                           OR COLUMN_NAME LIKE '%Cost%'
+                           OR COLUMN_NAME LIKE '%Landing%')
+                    ORDER BY ORDINAL_POSITION
+                """),
+
+                ("254 — MsItemMaster: full dump of rate/price columns for 20 items", """
+                    SELECT TOP 20
+                        i.ItemID, i.ItemDescription,
+                        i.MrpBottRate, i.MrpCaseRate,
+                        b.BrandName, lt.LiquorType, st.SizeType
+                    FROM MsItemMaster i
+                    LEFT JOIN MsBrandMaster b  ON b.BrandID      = i.BrandID
+                    LEFT JOIN MsLiquorType lt  ON lt.LiquorTypeID = i.LiquorTypeID
+                    LEFT JOIN MsSizeType   st  ON st.SizeTypeID   = i.SizeTypeID
+                    ORDER BY i.ItemID
+                """),
+
+                ("255 — MsBatchMaster: all columns (batch-level rates)", """
+                    SELECT COLUMN_NAME, DATA_TYPE, NUMERIC_PRECISION, NUMERIC_SCALE
+                    FROM INFORMATION_SCHEMA.COLUMNS
+                    WHERE TABLE_NAME='MsBatchMaster'
+                    ORDER BY ORDINAL_POSITION
+                """),
+
+                ("256 — MsBatchMaster: full dump (batch rates, dates, quantities)", """
+                    SELECT TOP 30 * FROM MsBatchMaster ORDER BY 1 DESC
+                """),
+
+                # ════════════════════════════════════════════════════════════
+                # BLOCK V — Ageing & Credit Limit
+                # ════════════════════════════════════════════════════════════
+                ("257 — MsPartyOpening: all columns", """
+                    SELECT COLUMN_NAME, DATA_TYPE, IS_NULLABLE
+                    FROM INFORMATION_SCHEMA.COLUMNS
+                    WHERE TABLE_NAME='MsPartyOpening'
+                    ORDER BY ORDINAL_POSITION
+                """),
+
+                ("258 — MsPartyOpening: sample rows for D% customers (CloseBal vs CloseBalTmp)", """
+                    SELECT TOP 20 *
+                    FROM MsPartyOpening
+                    WHERE LEFT(PartyID,1)='D'
+                    ORDER BY PartyID
+                """),
+
+                ("259 — Outstanding: all TrVocDetail DR entries for one busy customer this FY", """
+                    SELECT TOP 1 PartyID FROM MsPartyOpening
+                    WHERE LEFT(PartyID,1)='D'
+                    ORDER BY ISNULL(CloseBalTmp,CloseBal) DESC
+                """),
+
+                ("260 — All TrVocDetail entries for the top-outstanding customer (full ledger)", """
+                    SELECT
+                        h.VoucherDate, t.ShortName, h.VoucherNo,
+                        d.DrCrIndicator, d.Amount, d.Narration,
+                        d.PartyID
+                    FROM TrVocDetail d
+                    JOIN TrVocHead h ON h.TransTypeID=d.TransTypeID AND h.VoucherNo=d.VoucherNo
+                    JOIN MsTransType t ON t.id_key=h.TransTypeID
+                    WHERE d.PartyID = (
+                        SELECT TOP 1 PartyID FROM MsPartyOpening
+                        WHERE LEFT(PartyID,1)='D'
+                        ORDER BY ISNULL(CloseBalTmp,CloseBal) DESC
+                    )
+                      AND h.VoucherDate >= '2025-04-01'
+                    ORDER BY h.VoucherDate, h.VoucherNo
+                """),
+
+                ("261 — Does TrVocDetail have a ReferenceVoucher / AgainstBill column?", """
+                    SELECT COLUMN_NAME, DATA_TYPE
+                    FROM INFORMATION_SCHEMA.COLUMNS
+                    WHERE TABLE_NAME='TrVocDetail'
+                      AND (COLUMN_NAME LIKE '%Ref%'
+                           OR COLUMN_NAME LIKE '%Against%'
+                           OR COLUMN_NAME LIKE '%Bill%'
+                           OR COLUMN_NAME LIKE '%Invoice%'
+                           OR COLUMN_NAME LIKE '%Adjust%')
+                    ORDER BY ORDINAL_POSITION
+                """),
+
+                # ════════════════════════════════════════════════════════════
+                # BLOCK W — Scheme / Free Goods Logic
+                # ════════════════════════════════════════════════════════════
+                ("262 — All tables with Scheme / Offer / Promotion / Free in name", """
+                    SELECT TABLE_NAME
+                    FROM INFORMATION_SCHEMA.TABLES
+                    WHERE TABLE_TYPE='BASE TABLE'
+                      AND (TABLE_NAME LIKE '%Scheme%'
+                           OR TABLE_NAME LIKE '%Offer%'
+                           OR TABLE_NAME LIKE '%Promo%'
+                           OR TABLE_NAME LIKE '%Free%'
+                           OR TABLE_NAME LIKE '%Bonus%'
+                           OR TABLE_NAME LIKE '%Discount%')
+                    ORDER BY TABLE_NAME
+                """),
+
+                ("263 — Free goods invoices: which items appear as FreeItemYN='Y'", """
+                    SELECT TOP 50
+                        i.ItemID, i.ItemDescription,
+                        COUNT(DISTINCT h.VoucherNo) AS vouchers,
+                        SUM(i.TotalBottleQty) AS free_bottles
+                    FROM TrVocItem i
+                    JOIN TrVocHead h ON h.TransTypeID=i.TransTypeID AND h.VoucherNo=i.VoucherNo
+                    JOIN MsTransType t ON t.id_key=h.TransTypeID
+                    WHERE t.ShortName='MS'
+                      AND ISNULL(h.Cancelled,'N') <> 'Y'
+                      AND ISNULL(i.FreeItemYN,'N')='Y'
+                      AND h.VoucherDate >= '2025-04-01'
+                    GROUP BY i.ItemID, i.ItemDescription
+                    ORDER BY free_bottles DESC
+                """),
+
+                ("264 — Free goods: same voucher showing paid item alongside free item", """
+                    SELECT
+                        h.VoucherNo, h.VoucherDate,
+                        i.SrNo, i.ItemDescription,
+                        i.TotalBottleQty, i.TotalAmount, i.FreeItemYN
+                    FROM TrVocItem i
+                    JOIN TrVocHead h ON h.TransTypeID=i.TransTypeID AND h.VoucherNo=i.VoucherNo
+                    JOIN MsTransType t ON t.id_key=h.TransTypeID
+                    WHERE t.ShortName='MS'
+                      AND ISNULL(h.Cancelled,'N') <> 'Y'
+                      AND h.VoucherDate >= '2025-04-01'
+                      AND h.VoucherNo IN (
+                          SELECT VoucherNo FROM TrVocItem
+                          WHERE ISNULL(FreeItemYN,'N')='Y'
+                            AND TransTypeID IN (SELECT id_key FROM MsTransType WHERE ShortName='MS')
+                      )
+                    ORDER BY h.VoucherNo, i.SrNo
+                """),
+
+                # ════════════════════════════════════════════════════════════
+                # BLOCK X — Transport Permit (TP) complete structure
+                # ════════════════════════════════════════════════════════════
+                ("265 — All TP tables: columns and row counts", """
+                    SELECT TABLE_NAME,
+                           (SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS c
+                            WHERE c.TABLE_NAME=t.TABLE_NAME) AS col_count
+                    FROM INFORMATION_SCHEMA.TABLES t
+                    WHERE TABLE_TYPE='BASE TABLE'
+                      AND (TABLE_NAME LIKE '%TP%'
+                           OR TABLE_NAME LIKE '%Transport%'
+                           OR TABLE_NAME LIKE '%Permit%'
+                           OR TABLE_NAME LIKE '%Pass%')
+                    ORDER BY TABLE_NAME
+                """),
+
+                ("266 — TrTPHead: all columns", """
+                    SELECT COLUMN_NAME, DATA_TYPE, IS_NULLABLE
+                    FROM INFORMATION_SCHEMA.COLUMNS
+                    WHERE TABLE_NAME='TrTPHead'
+                    ORDER BY ORDINAL_POSITION
+                """),
+
+                ("267 — TrTPHead sample + linkage to TrVocHead (TPNo / VoucherNo)", """
+                    SELECT TOP 10 * FROM TrTPHead ORDER BY 1 DESC
+                """),
+
+                ("268 — TrTPItem: all columns + sample rows", """
+                    SELECT TOP 20 i.*
+                    FROM TrTPItem i
+                    ORDER BY 1 DESC
+                """),
+
+                ("269 — TP to Invoice linkage: does TrVocHead.TPNo reference TrTPHead?", """
+                    SELECT COLUMN_NAME, DATA_TYPE
+                    FROM INFORMATION_SCHEMA.COLUMNS
+                    WHERE TABLE_NAME='TrVocHead'
+                      AND (COLUMN_NAME LIKE '%TP%'
+                           OR COLUMN_NAME LIKE '%Permit%'
+                           OR COLUMN_NAME LIKE '%Transport%')
+                    ORDER BY ORDINAL_POSITION
+                """),
+
+                # ════════════════════════════════════════════════════════════
+                # BLOCK Y — Salesman, Customer Category, Discount Structure
+                # ════════════════════════════════════════════════════════════
+                ("270 — MsSalesmanMaster: all columns + all rows", """
+                    SELECT COLUMN_NAME, DATA_TYPE
+                    FROM INFORMATION_SCHEMA.COLUMNS
+                    WHERE TABLE_NAME='MsSalesmanMaster'
+                    ORDER BY ORDINAL_POSITION
+                """),
+
+                ("271 — MsSalesmanMaster: full dump", """
+                    SELECT * FROM MsSalesmanMaster ORDER BY 1
+                """),
+
+                ("272 — Salesman → customer assignment: does MsPartyMaster have SalesmanID?", """
+                    SELECT COLUMN_NAME, DATA_TYPE
+                    FROM INFORMATION_SCHEMA.COLUMNS
+                    WHERE TABLE_NAME='MsPartyMaster'
+                      AND (COLUMN_NAME LIKE '%Salesman%'
+                           OR COLUMN_NAME LIKE '%Sales%'
+                           OR COLUMN_NAME LIKE '%Agent%'
+                           OR COLUMN_NAME LIKE '%Rep%')
+                    ORDER BY ORDINAL_POSITION
+                """),
+
+                ("273 — TrVocHead: does it carry SalesmanID per voucher?", """
+                    SELECT COLUMN_NAME, DATA_TYPE
+                    FROM INFORMATION_SCHEMA.COLUMNS
+                    WHERE TABLE_NAME='TrVocHead'
+                      AND (COLUMN_NAME LIKE '%Salesman%'
+                           OR COLUMN_NAME LIKE '%Agent%'
+                           OR COLUMN_NAME LIKE '%Rep%')
+                    ORDER BY ORDINAL_POSITION
+                """),
+
+                ("274 — Salesman target tables (if any)", """
+                    SELECT TABLE_NAME
+                    FROM INFORMATION_SCHEMA.TABLES
+                    WHERE TABLE_TYPE='BASE TABLE'
+                      AND (TABLE_NAME LIKE '%Target%'
+                           OR TABLE_NAME LIKE '%Quota%'
+                           OR TABLE_NAME LIKE '%Budget%'
+                           OR TABLE_NAME LIKE '%SalesTarget%')
+                    ORDER BY TABLE_NAME
+                """),
+
+                ("275 — Customer category master: all tables with Category in name", """
+                    SELECT TABLE_NAME
+                    FROM INFORMATION_SCHEMA.TABLES
+                    WHERE TABLE_TYPE='BASE TABLE'
+                      AND TABLE_NAME LIKE '%Category%'
+                    ORDER BY TABLE_NAME
+                """),
+
+                ("276 — MsPartyCategory or equivalent: full dump", """
+                    SELECT COLUMN_NAME, DATA_TYPE
+                    FROM INFORMATION_SCHEMA.COLUMNS
+                    WHERE TABLE_NAME IN (
+                        SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES
+                        WHERE TABLE_TYPE='BASE TABLE' AND TABLE_NAME LIKE '%Category%'
+                    )
+                    ORDER BY TABLE_NAME, ORDINAL_POSITION
+                """),
+
+                ("277 — Sales by customer category this FY", """
+                    SELECT
+                        cat.CategoryName,
+                        COUNT(DISTINCT p.PartyID) AS customers,
+                        SUM(i.TotalAmount)        AS sales_amount,
+                        SUM(i.TotalBottleQty)     AS bottles
+                    FROM TrVocItem i
+                    JOIN TrVocHead h ON h.TransTypeID=i.TransTypeID AND h.VoucherNo=i.VoucherNo
+                    JOIN MsTransType t ON t.id_key=h.TransTypeID
+                    JOIN MsPartyMaster p ON p.PartyID=h.PartyID
+                    LEFT JOIN MsPartyCategory cat ON cat.CategoryID=p.CategoryID
+                    WHERE t.ShortName='MS'
+                      AND ISNULL(h.Cancelled,'N') <> 'Y'
+                      AND ISNULL(i.FreeItemYN,'N') <> 'Y'
+                      AND h.VoucherDate >= '2025-04-01'
+                      AND h.VoucherDate <  '2026-04-01'
+                    GROUP BY cat.CategoryName
+                    ORDER BY sales_amount DESC
+                """),
+
+                # ════════════════════════════════════════════════════════════
+                # BLOCK Z — Complete Master Reference (every lookup table)
+                # ════════════════════════════════════════════════════════════
+                ("278 — All Ms* master tables: names + row counts", """
+                    SELECT TABLE_NAME,
+                           (SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS c
+                            WHERE c.TABLE_NAME=t.TABLE_NAME) AS col_count
+                    FROM INFORMATION_SCHEMA.TABLES t
+                    WHERE TABLE_TYPE='BASE TABLE' AND TABLE_NAME LIKE 'Ms%'
+                    ORDER BY TABLE_NAME
+                """),
+
+                ("279 — All Tr* transaction tables: names + row counts", """
+                    SELECT TABLE_NAME,
+                           (SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS c
+                            WHERE c.TABLE_NAME=t.TABLE_NAME) AS col_count
+                    FROM INFORMATION_SCHEMA.TABLES t
+                    WHERE TABLE_TYPE='BASE TABLE' AND TABLE_NAME LIKE 'Tr%'
+                    ORDER BY TABLE_NAME
+                """),
+
+                ("280 — MsLiquorType: full dump (all liquor types)", """
+                    SELECT * FROM MsLiquorType ORDER BY 1
+                """),
+
+                ("281 — MsSizeType: full dump (bottle sizes)", """
+                    SELECT * FROM MsSizeType ORDER BY 1
+                """),
+
+                ("282 — MsPackType / MsPackMaster: full dump (case/pack config)", """
+                    SELECT TABLE_NAME
+                    FROM INFORMATION_SCHEMA.TABLES
+                    WHERE TABLE_TYPE='BASE TABLE'
+                      AND (TABLE_NAME LIKE '%Pack%' OR TABLE_NAME LIKE '%Case%')
+                    ORDER BY TABLE_NAME
+                """),
+
+                ("283 — MsTransType: full dump (all transaction type definitions)", """
+                    SELECT * FROM MsTransType ORDER BY id_key
+                """),
+
+                ("284 — MsTransType: all columns (checking for VoucherFlag, StockEffect, AccountingEffect)", """
+                    SELECT COLUMN_NAME, DATA_TYPE, IS_NULLABLE
+                    FROM INFORMATION_SCHEMA.COLUMNS
+                    WHERE TABLE_NAME='MsTransType'
+                    ORDER BY ORDINAL_POSITION
+                """),
+
+                ("285 — MsUserMaster: all columns (user access structure)", """
+                    SELECT COLUMN_NAME, DATA_TYPE, IS_NULLABLE
+                    FROM INFORMATION_SCHEMA.COLUMNS
+                    WHERE TABLE_NAME IN (
+                        SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES
+                        WHERE TABLE_TYPE='BASE TABLE'
+                          AND (TABLE_NAME LIKE '%User%' OR TABLE_NAME LIKE '%Login%'
+                               OR TABLE_NAME LIKE '%Access%' OR TABLE_NAME LIKE '%Role%'
+                               OR TABLE_NAME LIKE '%Rights%' OR TABLE_NAME LIKE '%Permission%')
+                    )
+                    ORDER BY TABLE_NAME, ORDINAL_POSITION
+                """),
+
+                ("286 — MsUserMaster: sample rows (who has access, roles)", """
+                    SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES
+                    WHERE TABLE_TYPE='BASE TABLE'
+                      AND (TABLE_NAME LIKE '%User%' OR TABLE_NAME LIKE '%Login%'
+                           OR TABLE_NAME LIKE '%Role%')
+                    ORDER BY TABLE_NAME
+                """),
+
+                ("287 — VoucherFlag values in TrVocHead: all distinct values + transaction types", """
+                    SELECT h.VoucherFlag, t.ShortName, t.TransTypeName,
+                           COUNT(*) AS vouchers
+                    FROM TrVocHead h
+                    JOIN MsTransType t ON t.id_key=h.TransTypeID
+                    WHERE h.VoucherDate >= '2025-04-01'
+                    GROUP BY h.VoucherFlag, t.ShortName, t.TransTypeName
+                    ORDER BY t.ShortName, h.VoucherFlag
+                """),
+
+                ("288 — TrVocHead: every column present (final full list)", """
+                    SELECT COLUMN_NAME, DATA_TYPE, IS_NULLABLE
+                    FROM INFORMATION_SCHEMA.COLUMNS
+                    WHERE TABLE_NAME='TrVocHead'
+                    ORDER BY ORDINAL_POSITION
+                """),
+
+                ("289 — TrVocItem: every column present (final full list)", """
+                    SELECT COLUMN_NAME, DATA_TYPE, IS_NULLABLE
+                    FROM INFORMATION_SCHEMA.COLUMNS
+                    WHERE TABLE_NAME='TrVocItem'
+                    ORDER BY ORDINAL_POSITION
+                """),
+
+                ("290 — Identify which transaction types actually write TrVocItem rows", """
+                    SELECT t.ShortName, t.TransTypeName,
+                           COUNT(DISTINCT i.VoucherNo) AS vouchers_with_items
+                    FROM TrVocItem i
+                    JOIN TrVocHead h ON h.TransTypeID=i.TransTypeID AND h.VoucherNo=i.VoucherNo
+                    JOIN MsTransType t ON t.id_key=h.TransTypeID
+                    WHERE h.VoucherDate >= '2025-04-01'
+                    GROUP BY t.ShortName, t.TransTypeName
+                    ORDER BY vouchers_with_items DESC
+                """),
+
+                ("291 — MsItemBatchOpening: all columns + sample (opening stock structure)", """
+                    SELECT COLUMN_NAME, DATA_TYPE, IS_NULLABLE
+                    FROM INFORMATION_SCHEMA.COLUMNS
+                    WHERE TABLE_NAME='MsItemBatchOpening'
+                    ORDER BY ORDINAL_POSITION
+                """),
+
+                ("292 — MsItemBatchOpening: full dump (TOP 30)", """
+                    SELECT TOP 30 * FROM MsItemBatchOpening ORDER BY 1
+                """),
+
+                ("293 — Stock as computed: opening + PU purchases - MS sales - SA breakage per item", """
+                    SELECT
+                        m.ItemID,
+                        m.ItemDescription,
+                        ISNULL(op.OpeningQty, 0)   AS opening_bottles,
+                        ISNULL(pu.pur_bottles, 0)  AS purchased_bottles,
+                        ISNULL(ms.sale_bottles, 0) AS sold_bottles,
+                        ISNULL(sa.brk_bottles, 0)  AS breakage_bottles,
+                        ISNULL(op.OpeningQty,0)
+                          + ISNULL(pu.pur_bottles,0)
+                          - ISNULL(ms.sale_bottles,0)
+                          - ISNULL(sa.brk_bottles,0) AS closing_bottles
+                    FROM MsItemMaster m
+                    LEFT JOIN (
+                        SELECT ItemID, SUM(OpeningQty) AS OpeningQty
+                        FROM MsItemBatchOpening GROUP BY ItemID
+                    ) op ON op.ItemID = m.ItemID
+                    LEFT JOIN (
+                        SELECT i.ItemID, SUM(i.TotalBottleQty) AS pur_bottles
+                        FROM TrVocItem i
+                        JOIN TrVocHead h ON h.TransTypeID=i.TransTypeID AND h.VoucherNo=i.VoucherNo
+                        JOIN MsTransType t ON t.id_key=h.TransTypeID
+                        WHERE t.ShortName='PU'
+                          AND ISNULL(h.Cancelled,'N') <> 'Y'
+                          AND h.VoucherDate >= '2025-04-01'
+                        GROUP BY i.ItemID
+                    ) pu ON pu.ItemID = m.ItemID
+                    LEFT JOIN (
+                        SELECT i.ItemID, SUM(i.TotalBottleQty) AS sale_bottles
+                        FROM TrVocItem i
+                        JOIN TrVocHead h ON h.TransTypeID=i.TransTypeID AND h.VoucherNo=i.VoucherNo
+                        JOIN MsTransType t ON t.id_key=h.TransTypeID
+                        WHERE t.ShortName='MS'
+                          AND ISNULL(h.Cancelled,'N') <> 'Y'
+                          AND ISNULL(i.FreeItemYN,'N') <> 'Y'
+                          AND h.VoucherDate >= '2025-04-01'
+                        GROUP BY i.ItemID
+                    ) ms ON ms.ItemID = m.ItemID
+                    LEFT JOIN (
+                        SELECT i.ItemID, SUM(i.TotalBottleQty) AS brk_bottles
+                        FROM TrVocItem i
+                        JOIN TrVocHead h ON h.TransTypeID=i.TransTypeID AND h.VoucherNo=i.VoucherNo
+                        JOIN MsTransType t ON t.id_key=h.TransTypeID
+                        WHERE t.ShortName='SA'
+                          AND ISNULL(h.Cancelled,'N') <> 'Y'
+                          AND h.VoucherDate >= '2025-04-01'
+                        GROUP BY i.ItemID
+                    ) sa ON sa.ItemID = m.ItemID
+                    ORDER BY closing_bottles DESC
+                """),
+
+                ("294 — Expense GL accounts: all TrVocDetail entries where PartyID is not D% or C%", """
+                    SELECT
+                        d.PartyID AS gl_account,
+                        p.PartyName,
+                        t.ShortName,
+                        SUM(CASE WHEN d.DrCrIndicator='D' THEN d.Amount ELSE 0 END) AS debit_total,
+                        SUM(CASE WHEN d.DrCrIndicator='C' THEN d.Amount ELSE 0 END) AS credit_total,
+                        COUNT(*) AS entries
+                    FROM TrVocDetail d
+                    JOIN TrVocHead h ON h.TransTypeID=d.TransTypeID AND h.VoucherNo=d.VoucherNo
+                    JOIN MsTransType t ON t.id_key=h.TransTypeID
+                    LEFT JOIN MsPartyMaster p ON p.PartyID=d.PartyID
+                    WHERE h.VoucherDate >= '2025-04-01'
+                      AND h.VoucherDate < '2026-04-01'
+                      AND ISNULL(h.Cancelled,'N') <> 'Y'
+                      AND LEFT(d.PartyID,1) NOT IN ('D','C')
+                      AND d.PartyID IS NOT NULL AND d.PartyID <> ''
+                    GROUP BY d.PartyID, p.PartyName, t.ShortName
+                    ORDER BY debit_total DESC
+                """),
+
+                ("295 — Expense summary: total expenses by GL account (BP + CE, no TrVocItem)", """
+                    SELECT
+                        d.PartyID AS expense_account,
+                        p.PartyName,
+                        SUM(d.Amount) AS total_expense
+                    FROM TrVocDetail d
+                    JOIN TrVocHead h ON h.TransTypeID=d.TransTypeID AND h.VoucherNo=d.VoucherNo
+                    JOIN MsTransType t ON t.id_key=h.TransTypeID
+                    LEFT JOIN MsPartyMaster p ON p.PartyID=d.PartyID
+                    WHERE t.ShortName IN ('BP','CE')
+                      AND ISNULL(h.Cancelled,'N') <> 'Y'
+                      AND h.VoucherDate >= '2025-04-01'
+                      AND h.VoucherDate <  '2026-04-01'
+                      AND d.DrCrIndicator='D'
+                      AND LEFT(d.PartyID,1) NOT IN ('D','C')
+                      AND NOT EXISTS (SELECT 1 FROM TrVocItem i
+                                      WHERE i.TransTypeID=h.TransTypeID AND i.VoucherNo=h.VoucherNo)
+                    GROUP BY d.PartyID, p.PartyName
+                    ORDER BY total_expense DESC
+                """),
+
+                ("296 — Trial balance: every GL account DR/CR total this FY", """
+                    SELECT
+                        d.PartyID,
+                        p.PartyName,
+                        LEFT(d.PartyID,1) AS prefix,
+                        SUM(CASE WHEN d.DrCrIndicator='D' THEN d.Amount ELSE 0 END) AS total_debit,
+                        SUM(CASE WHEN d.DrCrIndicator='C' THEN d.Amount ELSE 0 END) AS total_credit,
+                        SUM(CASE WHEN d.DrCrIndicator='D' THEN d.Amount ELSE -d.Amount END) AS net_balance
+                    FROM TrVocDetail d
+                    JOIN TrVocHead h ON h.TransTypeID=d.TransTypeID AND h.VoucherNo=d.VoucherNo
+                    LEFT JOIN MsPartyMaster p ON p.PartyID=d.PartyID
+                    WHERE ISNULL(h.Cancelled,'N') <> 'Y'
+                      AND h.VoucherDate >= '2025-04-01'
+                      AND h.VoucherDate <  '2026-04-01'
+                    GROUP BY d.PartyID, p.PartyName
+                    ORDER BY total_debit DESC
+                """),
+
+                ("297 — Sales Register anatomy: all MS voucher lines joined to item/customer/salesman", """
+                    SELECT TOP 50
+                        h.VoucherDate, h.VoucherNo,
+                        p.PartyName AS customer,
+                        p.CategoryID,
+                        i.ItemDescription, i.TotalBottleQty, i.TotalAmount,
+                        i.FreeItemYN
+                    FROM TrVocItem i
+                    JOIN TrVocHead h ON h.TransTypeID=i.TransTypeID AND h.VoucherNo=i.VoucherNo
+                    JOIN MsTransType t ON t.id_key=h.TransTypeID
+                    JOIN MsPartyMaster p ON p.PartyID=h.PartyID
+                    WHERE t.ShortName='MS'
+                      AND ISNULL(h.Cancelled,'N') <> 'Y'
+                      AND ISNULL(i.FreeItemYN,'N') <> 'Y'
+                      AND h.VoucherDate >= '2025-04-01'
+                    ORDER BY h.VoucherDate DESC, h.VoucherNo DESC
+                """),
+
+                ("298 — Purchase Register anatomy: all PU lines joined to supplier/item", """
+                    SELECT TOP 50
+                        h.VoucherDate, h.VoucherNo,
+                        p.PartyName AS supplier,
+                        i.ItemDescription, i.TotalBottleQty, i.TotalAmount
+                    FROM TrVocItem i
+                    JOIN TrVocHead h ON h.TransTypeID=i.TransTypeID AND h.VoucherNo=i.VoucherNo
+                    JOIN MsTransType t ON t.id_key=h.TransTypeID
+                    LEFT JOIN MsPartyMaster p ON p.PartyID=h.PartyID
+                    WHERE t.ShortName='PU'
+                      AND ISNULL(h.Cancelled,'N') <> 'Y'
+                      AND h.VoucherDate >= '2025-04-01'
+                    ORDER BY h.VoucherDate DESC, h.VoucherNo DESC
+                """),
+
+                ("299 — Day Book: all voucher types in a single day (latest day with activity)", """
+                    SELECT
+                        h.VoucherDate, t.ShortName, h.VoucherNo,
+                        h.PartyID, p.PartyName,
+                        h.TotalAmount, h.Narration, h.Cancelled
+                    FROM TrVocHead h
+                    JOIN MsTransType t ON t.id_key=h.TransTypeID
+                    LEFT JOIN MsPartyMaster p ON p.PartyID=h.PartyID
+                    WHERE h.VoucherDate = (
+                        SELECT MAX(VoucherDate) FROM TrVocHead
+                        WHERE VoucherDate >= '2025-04-01' AND ISNULL(Cancelled,'N') <> 'Y'
+                    )
+                    ORDER BY t.ShortName, h.VoucherNo
+                """),
+
+                ("300 — Complete ERP summary: voucher count and total amount per type FY25-26", """
+                    SELECT
+                        t.ShortName,
+                        t.TransTypeName,
+                        COUNT(DISTINCT h.VoucherNo) AS voucher_count,
+                        SUM(h.TotalAmount)           AS total_amount,
+                        MIN(h.VoucherDate)           AS first_date,
+                        MAX(h.VoucherDate)           AS last_date
+                    FROM TrVocHead h
+                    JOIN MsTransType t ON t.id_key=h.TransTypeID
+                    WHERE ISNULL(h.Cancelled,'N') <> 'Y'
+                      AND h.VoucherDate >= '2025-04-01'
+                      AND h.VoucherDate <  '2026-04-01'
+                    GROUP BY t.ShortName, t.TransTypeName
+                    ORDER BY total_amount DESC
+                """),
             ]
 
             col_run, col_dl, col_clr = st.columns([2, 2, 1])
