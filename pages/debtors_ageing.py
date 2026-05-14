@@ -145,7 +145,7 @@ def render():
                                   color_scale="Oranges",
                                   yaxis_title="₹ Crores"),
                         use_container_width=True, key="da_salesman")
-        df_sm_disp = df_sm.copy()
+        df_sm_disp = df_sm[["salesman", "debtors", "outstanding"]].copy()
         df_sm_disp["outstanding"] = df_sm_disp["outstanding"].apply(fmt_inr)
         df_sm_disp.columns = ["Salesman", "Debtors", "Outstanding"]
         st.dataframe(df_sm_disp, use_container_width=True, hide_index=True)
