@@ -7,66 +7,194 @@ from db import get_connection, query
 def render():
     st.header("Database Schema Explorer")
 
-    tab_schema, tab_brands, tab_diag = st.tabs(["Schema Report", "Brand / Item Mapping", "🔍 Diagnostics"])
+    tab_survey, tab_brands, tab_diag = st.tabs(["📋 Full Schema Survey", "Brand / Item Mapping", "🔍 Diagnostics"])
 
-    # ── Tab 1: full schema JSON dump ──────────────────────────────────────────
-    with tab_schema:
-        col1, col2 = st.columns([3, 1])
-        with col2:
-            generate = st.button("Generate Report", type="primary", use_container_width=True)
+    # ── Tab 1: Full Schema Survey ─────────────────────────────────────────────
+    # Auto-discovers every table, row counts, all columns, TOP 5 sample rows.
+    # Downloads as a ZIP (one CSV per table for columns, one for samples).
+    with tab_survey:
+        st.markdown(
+            "Discovers **every table** in the ERP database: row counts, column types, "
+            "and sample rows. Use this to map the full schema before writing any queries."
+        )
 
-        if generate:
-            with st.spinner("Querying database, please wait..."):
-                try:
-                    conn = get_connection()
-                    cur = conn.cursor(as_dict=True)
+        col_btn, col_dl, _ = st.columns([2, 2, 3])
+        with col_btn:
+            run_survey = st.button("▶ Run Full Survey", type="primary", use_container_width=True)
+        with col_dl:
+            if "survey_zip" in st.session_state:
+                st.download_button(
+                    "⬇️ Download Survey (.zip)",
+                    data=st.session_state["survey_zip"],
+                    file_name="kwpl_full_schema_survey.zip",
+                    mime="application/zip",
+                    use_container_width=True,
+                )
+            else:
+                st.button("⬇️ Download Survey (.zip)", disabled=True, use_container_width=True)
 
-                    def q(sql):
-                        try:
-                            cur.execute(sql)
-                            return cur.fetchall() or []
-                        except Exception as e:
-                            return [{"ERROR": str(e)}]
+        if run_survey:
+            import io, zipfile as zf
+            progress = st.progress(0, text="Discovering tables…")
+            try:
+                conn = get_connection()
+                cur  = conn.cursor(as_dict=True)
 
-                    data = {}
-                    data["tables"] = q("SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_TYPE='BASE TABLE' ORDER BY TABLE_NAME")
-                    data["MsPartyMaster_columns"] = q("SELECT COLUMN_NAME, DATA_TYPE FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME='MsPartyMaster' ORDER BY ORDINAL_POSITION")
-                    data["MsPartyMaster_sample"] = q("SELECT TOP 10 * FROM MsPartyMaster")
-                    data["MsAccountHead_all"] = q("SELECT * FROM MsAccountHead")
-                    data["MsAccountHead_columns"] = q("SELECT COLUMN_NAME, DATA_TYPE FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME='MsAccountHead' ORDER BY ORDINAL_POSITION")
-                    data["XMainheadSubhead_all"] = q("SELECT * FROM XMainheadSubhead")
-                    data["XMainheadTypeMainhead_all"] = q("SELECT * FROM XMainheadTypeMainhead")
-                    data["MsTransType_all"] = q("SELECT * FROM MsTransType ORDER BY ShortName")
-                    data["MsItemBatchOpening_cols"] = q("SELECT COLUMN_NAME, DATA_TYPE FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME='MsItemBatchOpening' ORDER BY ORDINAL_POSITION")
-                    data["MsItemBatchOpening_sample"] = q("SELECT TOP 5 * FROM MsItemBatchOpening")
-                    data["MsSalesmanMaster_all"] = q("SELECT * FROM MsSalesmanMaster")
+                def _q(sql):
+                    try:
+                        cur.execute(sql)
+                        return cur.fetchall() or []
+                    except Exception as e:
+                        return [{"ERROR": str(e)}]
 
-                    for tbl in ["MsBrandMaster", "MsLiquorType", "MsSizeType", "MsServiceItemMaster", "MsCodeMaster"]:
-                        data[f"{tbl}_sample"] = q(f"SELECT TOP 5 * FROM {tbl}")
-                        data[f"{tbl}_cols"] = q(f"SELECT COLUMN_NAME, DATA_TYPE FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME='{tbl}' ORDER BY ORDINAL_POSITION")
+                # ── Step 1: all tables ────────────────────────────────────────
+                tables_raw = _q(
+                    "SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES "
+                    "WHERE TABLE_TYPE='BASE TABLE' ORDER BY TABLE_NAME"
+                )
+                tables = [r["TABLE_NAME"] for r in tables_raw if "ERROR" not in r]
+                progress.progress(0.05, text=f"Found {len(tables)} tables. Fetching row counts…")
 
-                    br = q("SELECT TOP 1 h.VoucherNo, h.TransTypeID FROM TrVocHead h JOIN MsTransType t ON t.id_key=h.TransTypeID WHERE t.ShortName='BR' AND h.Cancelled<>'Y'")
-                    if br and "ERROR" not in br[0]:
-                        data["sample_BR_lines"] = q(f"SELECT * FROM TrVocDetail WHERE TransTypeID={br[0]['TransTypeID']} AND VoucherNo='{br[0]['VoucherNo']}'")
+                # ── Step 2: row counts for every table ───────────────────────
+                row_counts = {}
+                for i, tbl in enumerate(tables):
+                    rc = _q(f"SELECT COUNT(*) AS n FROM [{tbl}]")
+                    row_counts[tbl] = rc[0].get("n", 0) if rc and "ERROR" not in rc[0] else "ERR"
+                    progress.progress(0.05 + 0.30 * (i + 1) / len(tables),
+                                      text=f"Row counts: {tbl}")
 
-                    ms = q("SELECT TOP 1 h.VoucherNo, h.TransTypeID FROM TrVocHead h JOIN MsTransType t ON t.id_key=h.TransTypeID WHERE t.ShortName='MS' AND h.Cancelled<>'Y'")
-                    if ms and "ERROR" not in ms[0]:
-                        data["sample_MS_lines"] = q(f"SELECT * FROM TrVocDetail WHERE TransTypeID={ms[0]['TransTypeID']} AND VoucherNo='{ms[0]['VoucherNo']}'")
+                # ── Step 3: columns for every table ──────────────────────────
+                all_columns = {}
+                for i, tbl in enumerate(tables):
+                    cols = _q(
+                        f"SELECT COLUMN_NAME, DATA_TYPE, CHARACTER_MAXIMUM_LENGTH, "
+                        f"NUMERIC_PRECISION, NUMERIC_SCALE, IS_NULLABLE "
+                        f"FROM INFORMATION_SCHEMA.COLUMNS "
+                        f"WHERE TABLE_NAME='{tbl}' ORDER BY ORDINAL_POSITION"
+                    )
+                    all_columns[tbl] = cols
+                    progress.progress(0.35 + 0.30 * (i + 1) / len(tables),
+                                      text=f"Columns: {tbl}")
 
-                    conn.close()
-                    st.session_state["schema_json"] = json.dumps(data, indent=2, default=str).encode()
+                # ── Step 4: TOP 5 sample rows for every table ─────────────────
+                all_samples = {}
+                for i, tbl in enumerate(tables):
+                    rows = _q(f"SELECT TOP 5 * FROM [{tbl}]")
+                    all_samples[tbl] = rows
+                    progress.progress(0.65 + 0.30 * (i + 1) / len(tables),
+                                      text=f"Samples: {tbl}")
 
-                except Exception as e:
-                    st.error(f"Error: {e}")
+                # ── Step 5: FK relationships ──────────────────────────────────
+                fks = _q("""
+                    SELECT
+                        fk.name                              AS fk_name,
+                        tp.name                              AS parent_table,
+                        cp.name                              AS parent_column,
+                        tr.name                              AS ref_table,
+                        cr.name                              AS ref_column
+                    FROM sys.foreign_keys fk
+                    JOIN sys.foreign_key_columns fkc ON fkc.constraint_object_id = fk.object_id
+                    JOIN sys.tables  tp ON tp.object_id = fkc.parent_object_id
+                    JOIN sys.columns cp ON cp.object_id = fkc.parent_object_id
+                                       AND cp.column_id = fkc.parent_column_id
+                    JOIN sys.tables  tr ON tr.object_id = fkc.referenced_object_id
+                    JOIN sys.columns cr ON cr.object_id = fkc.referenced_object_id
+                                       AND cr.column_id = fkc.referenced_column_id
+                    ORDER BY tp.name, fk.name
+                """)
 
-        if "schema_json" in st.session_state:
-            st.success("Ready!")
-            st.download_button(
-                label="⬇️ Download schema_report.json",
-                data=st.session_state["schema_json"],
-                file_name="schema_report.json",
-                mime="application/json",
+                conn.close()
+                progress.progress(0.97, text="Building ZIP…")
+
+                # ── Build ZIP ────────────────────────────────────────────────
+                buf = io.BytesIO()
+                with zf.ZipFile(buf, "w", zf.ZIP_DEFLATED) as z:
+                    # Summary: table name + row count
+                    summary_rows = [{"table": t, "row_count": row_counts.get(t, "?")}
+                                    for t in tables]
+                    z.writestr("_summary.csv",
+                               pd.DataFrame(summary_rows).to_csv(index=False))
+
+                    # FK relationships
+                    if fks and "ERROR" not in fks[0]:
+                        z.writestr("_foreign_keys.csv",
+                                   pd.DataFrame(fks).to_csv(index=False))
+
+                    # Per-table: columns + samples
+                    for tbl in tables:
+                        cols = all_columns.get(tbl, [])
+                        if cols and "ERROR" not in cols[0]:
+                            z.writestr(f"{tbl}__columns.csv",
+                                       pd.DataFrame(cols).to_csv(index=False))
+                        samp = all_samples.get(tbl, [])
+                        if samp and "ERROR" not in samp[0]:
+                            z.writestr(f"{tbl}__sample.csv",
+                                       pd.DataFrame(samp).to_csv(index=False))
+
+                buf.seek(0)
+                st.session_state["survey_zip"]     = buf.getvalue()
+                st.session_state["survey_tables"]  = tables
+                st.session_state["survey_counts"]  = row_counts
+                st.session_state["survey_columns"] = all_columns
+                st.session_state["survey_samples"] = all_samples
+                st.session_state["survey_fks"]     = fks
+
+                progress.progress(1.0, text="Done.")
+                st.rerun()
+
+            except Exception as e:
+                st.error(f"Survey failed: {e}")
+
+        # ── Display results ───────────────────────────────────────────────────
+        if "survey_tables" in st.session_state:
+            tables      = st.session_state["survey_tables"]
+            row_counts  = st.session_state["survey_counts"]
+            all_columns = st.session_state["survey_columns"]
+            all_samples = st.session_state["survey_samples"]
+            fks         = st.session_state["survey_fks"]
+
+            # Summary table
+            st.subheader(f"All Tables ({len(tables)} found)")
+            df_sum = pd.DataFrame([
+                {"Table": t, "Rows": row_counts.get(t, "?"),
+                 "Prefix": t[:2] if len(t) >= 2 else t}
+                for t in tables
+            ])
+            df_sum = df_sum.sort_values("Rows", ascending=False, key=lambda x: pd.to_numeric(x, errors="coerce"))
+            st.dataframe(df_sum[["Table", "Rows", "Prefix"]], use_container_width=True, hide_index=True)
+
+            st.divider()
+
+            # FK map
+            if fks and "ERROR" not in fks[0]:
+                with st.expander("Foreign Key Relationships"):
+                    st.dataframe(pd.DataFrame(fks), use_container_width=True, hide_index=True)
+
+            st.divider()
+
+            # Per-table drill-down
+            st.subheader("Table Detail")
+            selected = st.selectbox(
+                "Select a table to inspect",
+                options=tables,
+                format_func=lambda t: f"{t}  ({row_counts.get(t, '?')} rows)"
             )
+            if selected:
+                col_l, col_r = st.columns(2)
+                with col_l:
+                    st.markdown(f"**Columns — {selected}**")
+                    cols = all_columns.get(selected, [])
+                    if cols and "ERROR" not in cols[0]:
+                        st.dataframe(pd.DataFrame(cols), use_container_width=True, hide_index=True)
+                    else:
+                        st.warning("No column data.")
+                with col_r:
+                    st.markdown(f"**Sample rows (TOP 5) — {selected}**")
+                    samp = all_samples.get(selected, [])
+                    if samp and "ERROR" not in samp[0]:
+                        st.dataframe(pd.DataFrame(samp), use_container_width=True, hide_index=True)
+                    else:
+                        st.info("No rows / error.")
 
     # ── Tab 2: Brand / Item mapping dump ─────────────────────────────────────
     with tab_brands:
