@@ -7,7 +7,10 @@ from db import get_connection, query
 def render():
     st.header("Database Schema Explorer")
 
-    tab_survey, tab_brands, tab_diag = st.tabs(["📋 Full Schema Survey", "Brand / Item Mapping", "🔍 Diagnostics"])
+    tab_survey, tab_brands, tab_objects, tab_diag = st.tabs([
+        "📋 Full Schema Survey", "Brand / Item Mapping",
+        "🗃️ DB Objects", "🔍 Diagnostics",
+    ])
 
     # ── Tab 1: Full Schema Survey ─────────────────────────────────────────────
     # Auto-discovers every table, row counts, all columns, TOP 5 sample rows.
@@ -283,7 +286,356 @@ def render():
                 key="dl_items"
             )
 
-    # ── Tab 3: Diagnostics ────────────────────────────────────────────────────
+    # ── Tab 3: DB Objects ─────────────────────────────────────────────────────
+    # Discovers every programmatic object in the database: views, stored procs,
+    # functions, triggers, indexes, computed columns, identity columns.
+    # The SQL definitions of views/SPs are the ERP's own report logic — this is
+    # the single most important thing to understand before writing any query.
+    with tab_objects:
+        st.markdown(
+            "Discovers every **programmatic object** the ERP has created: views, stored "
+            "procedures, functions, triggers, indexes, computed columns, and identity columns. "
+            "**Views and SPs contain the ERP's own report SQL** — the most direct way to "
+            "understand what each report reads and how it aggregates."
+        )
+        col_btn2, col_dl2, _ = st.columns([2, 2, 3])
+        with col_btn2:
+            run_objects = st.button("▶ Discover DB Objects", type="primary",
+                                    use_container_width=True, key="run_obj")
+        with col_dl2:
+            if "obj_zip" in st.session_state:
+                st.download_button(
+                    "⬇️ Download Objects (.zip)",
+                    data=st.session_state["obj_zip"],
+                    file_name="kwpl_db_objects.zip",
+                    mime="application/zip",
+                    use_container_width=True,
+                    key="dl_obj",
+                )
+            else:
+                st.button("⬇️ Download Objects (.zip)", disabled=True,
+                          use_container_width=True, key="dl_obj_dis")
+
+        if run_objects:
+            import io as _io, zipfile as _zf
+            prog2 = st.progress(0, text="Scanning DB objects…")
+            try:
+                conn2 = get_connection()
+                c2    = conn2.cursor(as_dict=True)
+
+                def _q2(sql):
+                    try:
+                        c2.execute(sql)
+                        return c2.fetchall() or []
+                    except Exception as e:
+                        return [{"ERROR": str(e)}]
+
+                # ── Views ────────────────────────────────────────────────────
+                prog2.progress(0.05, text="Views…")
+                views = _q2("""
+                    SELECT v.name AS view_name,
+                           m.definition AS view_sql
+                    FROM sys.views v
+                    JOIN sys.sql_modules m ON m.object_id = v.object_id
+                    ORDER BY v.name
+                """)
+
+                # ── Stored Procedures ─────────────────────────────────────────
+                prog2.progress(0.18, text="Stored procedures…")
+                procs = _q2("""
+                    SELECT p.name AS proc_name,
+                           m.definition AS proc_sql
+                    FROM sys.procedures p
+                    JOIN sys.sql_modules m ON m.object_id = p.object_id
+                    ORDER BY p.name
+                """)
+
+                # ── User-Defined Functions ────────────────────────────────────
+                prog2.progress(0.28, text="Functions…")
+                funcs = _q2("""
+                    SELECT o.name AS func_name,
+                           o.type_desc,
+                           m.definition AS func_sql
+                    FROM sys.objects o
+                    JOIN sys.sql_modules m ON m.object_id = o.object_id
+                    WHERE o.type IN ('FN','IF','TF')
+                    ORDER BY o.name
+                """)
+
+                # ── Triggers ─────────────────────────────────────────────────
+                prog2.progress(0.36, text="Triggers…")
+                triggers = _q2("""
+                    SELECT t.name AS trigger_name,
+                           OBJECT_NAME(t.parent_id) AS on_table,
+                           m.definition AS trigger_sql
+                    FROM sys.triggers t
+                    JOIN sys.sql_modules m ON m.object_id = t.object_id
+                    ORDER BY on_table, t.name
+                """)
+
+                # ── Indexes ───────────────────────────────────────────────────
+                # One row per index column so no STRING_AGG needed.
+                prog2.progress(0.46, text="Indexes…")
+                indexes = _q2("""
+                    SELECT
+                        tb.name                AS table_name,
+                        i.name                 AS index_name,
+                        i.type_desc,
+                        i.is_unique,
+                        i.is_primary_key,
+                        ic.key_ordinal,
+                        ic.is_included_column,
+                        c.name                 AS column_name
+                    FROM sys.indexes i
+                    JOIN sys.tables          tb ON tb.object_id = i.object_id
+                    JOIN sys.index_columns   ic ON ic.object_id = i.object_id
+                                               AND ic.index_id  = i.index_id
+                    JOIN sys.columns         c  ON c.object_id  = ic.object_id
+                                               AND c.column_id  = ic.column_id
+                    WHERE i.type > 0
+                    ORDER BY tb.name, i.is_primary_key DESC, i.name, ic.key_ordinal
+                """)
+
+                # ── Computed Columns ──────────────────────────────────────────
+                prog2.progress(0.62, text="Computed columns…")
+                computed = _q2("""
+                    SELECT
+                        t.name  AS table_name,
+                        c.name  AS column_name,
+                        cc.definition AS expression,
+                        cc.is_persisted
+                    FROM sys.computed_columns cc
+                    JOIN sys.tables  t ON t.object_id  = cc.object_id
+                    JOIN sys.columns c ON c.object_id  = cc.object_id
+                                     AND c.column_id   = cc.column_id
+                    ORDER BY t.name, c.name
+                """)
+
+                # ── Identity Columns ──────────────────────────────────────────
+                prog2.progress(0.74, text="Identity columns…")
+                identities = _q2("""
+                    SELECT
+                        t.name  AS table_name,
+                        c.name  AS column_name,
+                        ic.seed_value,
+                        ic.increment_value,
+                        ic.last_value
+                    FROM sys.identity_columns ic
+                    JOIN sys.tables  t ON t.object_id = ic.object_id
+                    JOIN sys.columns c ON c.object_id = ic.object_id
+                                     AND c.column_id  = ic.column_id
+                    ORDER BY t.name
+                """)
+
+                # ── Column Defaults ───────────────────────────────────────────
+                prog2.progress(0.82, text="Column defaults…")
+                defaults = _q2("""
+                    SELECT
+                        t.name   AS table_name,
+                        c.name   AS column_name,
+                        d.definition AS default_value,
+                        c.is_nullable
+                    FROM sys.default_constraints d
+                    JOIN sys.tables  t ON t.object_id = d.parent_object_id
+                    JOIN sys.columns c ON c.object_id = d.parent_object_id
+                                     AND c.column_id  = d.parent_column_id
+                    ORDER BY t.name, c.name
+                """)
+
+                # ── Check Constraints ─────────────────────────────────────────
+                prog2.progress(0.88, text="Check constraints…")
+                checks = _q2("""
+                    SELECT
+                        t.name  AS table_name,
+                        cc.name AS constraint_name,
+                        cc.definition
+                    FROM sys.check_constraints cc
+                    JOIN sys.tables t ON t.object_id = cc.parent_object_id
+                    ORDER BY t.name
+                """)
+
+                # ── Unique Constraints ────────────────────────────────────────
+                prog2.progress(0.93, text="Unique constraints…")
+                unique_idx = _q2("""
+                    SELECT
+                        t.name  AS table_name,
+                        i.name  AS constraint_name,
+                        c.name  AS column_name
+                    FROM sys.indexes i
+                    JOIN sys.tables        t  ON t.object_id  = i.object_id
+                    JOIN sys.index_columns ic ON ic.object_id = i.object_id
+                                             AND ic.index_id  = i.index_id
+                    JOIN sys.columns       c  ON c.object_id  = ic.object_id
+                                             AND c.column_id  = ic.column_id
+                    WHERE i.is_unique_constraint = 1
+                    ORDER BY t.name, i.name, ic.key_ordinal
+                """)
+
+                conn2.close()
+                prog2.progress(0.97, text="Building ZIP…")
+
+                # ── Build ZIP ────────────────────────────────────────────────
+                buf2 = _io.BytesIO()
+                with _zf.ZipFile(buf2, "w", _zf.ZIP_DEFLATED) as z2:
+                    def _add(name, data):
+                        if data and "ERROR" not in data[0]:
+                            z2.writestr(name, pd.DataFrame(data).to_csv(index=False))
+
+                    _add("views.csv",        views)
+                    _add("stored_procs.csv", procs)
+                    _add("functions.csv",    funcs)
+                    _add("triggers.csv",     triggers)
+                    _add("indexes.csv",      indexes)
+                    _add("computed_cols.csv",computed)
+                    _add("identity_cols.csv",identities)
+                    _add("col_defaults.csv", defaults)
+                    _add("check_constraints.csv", checks)
+                    _add("unique_constraints.csv", unique_idx)
+
+                    # Full SQL text files for views and procs
+                    if views and "ERROR" not in views[0]:
+                        for row in views:
+                            safe = row["view_name"].replace("/","_")
+                            z2.writestr(f"views/{safe}.sql",
+                                        row.get("view_sql") or "")
+                    if procs and "ERROR" not in procs[0]:
+                        for row in procs:
+                            safe = row["proc_name"].replace("/","_")
+                            z2.writestr(f"procs/{safe}.sql",
+                                        row.get("proc_sql") or "")
+                    if funcs and "ERROR" not in funcs[0]:
+                        for row in funcs:
+                            safe = row["func_name"].replace("/","_")
+                            z2.writestr(f"funcs/{safe}.sql",
+                                        row.get("func_sql") or "")
+                    if triggers and "ERROR" not in triggers[0]:
+                        for row in triggers:
+                            safe = row["trigger_name"].replace("/","_")
+                            z2.writestr(f"triggers/{safe}.sql",
+                                        row.get("trigger_sql") or "")
+
+                buf2.seek(0)
+                st.session_state["obj_zip"]      = buf2.getvalue()
+                st.session_state["obj_views"]     = views
+                st.session_state["obj_procs"]     = procs
+                st.session_state["obj_funcs"]     = funcs
+                st.session_state["obj_triggers"]  = triggers
+                st.session_state["obj_indexes"]   = indexes
+                st.session_state["obj_computed"]  = computed
+                st.session_state["obj_identities"]= identities
+                st.session_state["obj_defaults"]  = defaults
+                st.session_state["obj_checks"]    = checks
+                st.session_state["obj_unique"]    = unique_idx
+
+                prog2.progress(1.0, text="Done.")
+                st.rerun()
+
+            except Exception as ex:
+                st.error(f"Object scan failed: {ex}")
+
+        # ── Display ───────────────────────────────────────────────────────────
+        if "obj_views" in st.session_state:
+            views      = st.session_state["obj_views"]
+            procs      = st.session_state["obj_procs"]
+            funcs      = st.session_state["obj_funcs"]
+            triggers   = st.session_state["obj_triggers"]
+            indexes    = st.session_state["obj_indexes"]
+            computed   = st.session_state["obj_computed"]
+            identities = st.session_state["obj_identities"]
+
+            def _safe_df(data):
+                return pd.DataFrame(data) if data and "ERROR" not in data[0] else pd.DataFrame()
+
+            # ── Views ─────────────────────────────────────────────────────────
+            st.subheader(f"Views ({len([v for v in views if 'ERROR' not in v]) if views else 0})")
+            st.caption("If the ERP stores any report logic as views, the full SQL is here.")
+            df_v = _safe_df(views)
+            if not df_v.empty:
+                for _, row in df_v.iterrows():
+                    with st.expander(f"📄 {row['view_name']}"):
+                        st.code(row.get("view_sql",""), language="sql")
+            else:
+                st.info("No views found — ERP does not use SQL views for reports.")
+
+            st.divider()
+
+            # ── Stored Procedures ─────────────────────────────────────────────
+            st.subheader(f"Stored Procedures ({len([p for p in procs if 'ERROR' not in p]) if procs else 0})")
+            st.caption("SP definitions contain the exact SQL the ERP runs for each operation/report.")
+            df_p = _safe_df(procs)
+            if not df_p.empty:
+                for _, row in df_p.iterrows():
+                    with st.expander(f"⚙️ {row['proc_name']}"):
+                        st.code(row.get("proc_sql",""), language="sql")
+            else:
+                st.info("No stored procedures found.")
+
+            st.divider()
+
+            # ── Functions ─────────────────────────────────────────────────────
+            df_f = _safe_df(funcs)
+            st.subheader(f"User-Defined Functions ({len(df_f)})")
+            if not df_f.empty:
+                for _, row in df_f.iterrows():
+                    with st.expander(f"ƒ {row['func_name']} ({row.get('type_desc','')})"):
+                        st.code(row.get("func_sql",""), language="sql")
+            else:
+                st.info("No user-defined functions found.")
+
+            st.divider()
+
+            # ── Triggers ─────────────────────────────────────────────────────
+            df_tr = _safe_df(triggers)
+            st.subheader(f"Triggers ({len(df_tr)})")
+            st.caption("Triggers contain ERP business rules that fire automatically on INSERT/UPDATE/DELETE.")
+            if not df_tr.empty:
+                for _, row in df_tr.iterrows():
+                    with st.expander(f"⚡ {row['trigger_name']}  →  {row.get('on_table','')}"):
+                        st.code(row.get("trigger_sql",""), language="sql")
+            else:
+                st.info("No triggers found.")
+
+            st.divider()
+
+            # ── Indexes ──────────────────────────────────────────────────────
+            df_ix = _safe_df(indexes)
+            st.subheader(f"Index Inventory ({len(df_ix)} index-column rows)")
+            st.caption(
+                "Indexed columns reveal the ERP's query patterns — if a column is part of a "
+                "composite index it's almost certainly used as a WHERE/JOIN filter in reports."
+            )
+            if not df_ix.empty:
+                tbl_filter = st.selectbox(
+                    "Filter by table",
+                    options=["All tables"] + sorted(df_ix["table_name"].unique().tolist()),
+                    key="ix_tbl_filter",
+                )
+                df_show = df_ix if tbl_filter == "All tables" else df_ix[df_ix["table_name"] == tbl_filter]
+                st.dataframe(df_show, use_container_width=True, hide_index=True)
+
+            st.divider()
+
+            # ── Computed Columns ──────────────────────────────────────────────
+            df_cc = _safe_df(computed)
+            st.subheader(f"Computed Columns ({len(df_cc)})")
+            st.caption("Columns the ERP derives automatically — shows formulas baked into the schema.")
+            if not df_cc.empty:
+                st.dataframe(df_cc, use_container_width=True, hide_index=True)
+            else:
+                st.info("No computed columns found.")
+
+            st.divider()
+
+            # ── Identity Columns ──────────────────────────────────────────────
+            df_id = _safe_df(identities)
+            st.subheader(f"Identity / Auto-Increment Columns ({len(df_id)})")
+            st.caption("Auto-generated primary keys — tells us which tables use surrogate PKs.")
+            if not df_id.empty:
+                st.dataframe(df_id, use_container_width=True, hide_index=True)
+            else:
+                st.info("No identity columns found.")
+
+    # ── Tab 4: Diagnostics ────────────────────────────────────────────────────
     with tab_diag:
 
         @st.fragment
