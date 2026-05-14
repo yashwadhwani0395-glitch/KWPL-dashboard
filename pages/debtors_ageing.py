@@ -37,11 +37,11 @@ def render():
     df_age = query(f"""
         SELECT
             p.PartyName                                                      AS customer,
-            SUM(CASE WHEN DATEDIFF(DAY,h.VoucherDate,GETDATE()) BETWEEN  0 AND  30 THEN d.RemainingAmt ELSE 0 END) AS d0_30,
-            SUM(CASE WHEN DATEDIFF(DAY,h.VoucherDate,GETDATE()) BETWEEN 31 AND  60 THEN d.RemainingAmt ELSE 0 END) AS d31_60,
-            SUM(CASE WHEN DATEDIFF(DAY,h.VoucherDate,GETDATE()) BETWEEN 61 AND  90 THEN d.RemainingAmt ELSE 0 END) AS d61_90,
-            SUM(CASE WHEN DATEDIFF(DAY,h.VoucherDate,GETDATE()) BETWEEN 91 AND 180 THEN d.RemainingAmt ELSE 0 END) AS d91_180,
-            SUM(CASE WHEN DATEDIFF(DAY,h.VoucherDate,GETDATE())  > 180             THEN d.RemainingAmt ELSE 0 END) AS d180_plus,
+            SUM(CASE WHEN DATEDIFF(DAY,COALESCE(h.TPDate,h.VoucherDate),GETDATE()) BETWEEN  0 AND  30 THEN d.RemainingAmt ELSE 0 END) AS d0_30,
+            SUM(CASE WHEN DATEDIFF(DAY,COALESCE(h.TPDate,h.VoucherDate),GETDATE()) BETWEEN 31 AND  60 THEN d.RemainingAmt ELSE 0 END) AS d31_60,
+            SUM(CASE WHEN DATEDIFF(DAY,COALESCE(h.TPDate,h.VoucherDate),GETDATE()) BETWEEN 61 AND  90 THEN d.RemainingAmt ELSE 0 END) AS d61_90,
+            SUM(CASE WHEN DATEDIFF(DAY,COALESCE(h.TPDate,h.VoucherDate),GETDATE()) BETWEEN 91 AND 180 THEN d.RemainingAmt ELSE 0 END) AS d91_180,
+            SUM(CASE WHEN DATEDIFF(DAY,COALESCE(h.TPDate,h.VoucherDate),GETDATE())  > 180             THEN d.RemainingAmt ELSE 0 END) AS d180_plus,
             SUM(d.RemainingAmt)                                              AS total
         FROM TrVocDetail d
         JOIN TrVocHead h ON h.TransTypeID=d.TransTypeID AND h.VoucherNo=d.VoucherNo

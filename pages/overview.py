@@ -109,15 +109,17 @@ def render():
         GROUP BY YEAR(h.VoucherDate), MONTH(h.VoucherDate)
         ORDER BY yr, mo
     """)
-    # Collections = all credits to D% customer accounts (pending confirmation of
-    # correct DrCrIndicator convention for BR/CR in this ERP via diagnostic 26)
+    # BR/CR vouchers in this ERP debit the customer (DR=D%) when cash is received —
+    # opposite to standard convention. Collections = DrCrIndicator='D' on D% in BR/CR.
     df_coll = query(f"""
         SELECT YEAR(h.VoucherDate) AS yr, MONTH(h.VoucherDate) AS mo,
                SUM(d.Amount) AS collections
         FROM TrVocDetail d
         JOIN TrVocHead h ON h.TransTypeID=d.TransTypeID AND h.VoucherNo=d.VoucherNo
-        WHERE ISNULL(h.Cancelled,'N') <> 'Y'
-          AND d.DrCrIndicator='C' AND LEFT(d.PartyID, 1) = 'D'
+        JOIN MsTransType t ON t.id_key=h.TransTypeID
+        WHERE t.ShortName IN ('BR','CR')
+          AND ISNULL(h.Cancelled,'N') <> 'Y'
+          AND d.DrCrIndicator='D' AND LEFT(d.PartyID, 1) = 'D'
           {date_filter}
         GROUP BY YEAR(h.VoucherDate), MONTH(h.VoucherDate)
         ORDER BY yr, mo

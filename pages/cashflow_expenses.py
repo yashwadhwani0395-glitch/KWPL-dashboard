@@ -15,7 +15,8 @@ def render():
     date_filter = st.session_state.get("date_filter", "")
 
     st.info(
-        "Collections = Bank Receipts (BR) + Cash Receipts (CR) credited to customer accounts. "
+        "Collections = Bank Receipts (BR) + Cash Receipts (CR) — customer accounts are debited "
+        "when payment is received in this ERP. "
         "Payments = Bank Payment (BP) + Cash Payment (CE) vouchers, debit side.",
         icon="ℹ️"
     )
@@ -67,7 +68,7 @@ def render():
         JOIN MsTransType t ON t.id_key=h.TransTypeID
         WHERE t.ShortName IN ('BR','CR')
           AND ISNULL(h.Cancelled,'N') <> 'Y'
-          AND d.DrCrIndicator='C' AND LEFT(d.PartyID,1)='D'
+          AND d.DrCrIndicator='D' AND LEFT(d.PartyID,1)='D'
           {date_filter}
         GROUP BY YEAR(h.VoucherDate), MONTH(h.VoucherDate)
         ORDER BY yr, mo
@@ -126,7 +127,7 @@ def render():
             JOIN MsPartyMaster p ON p.PartyID=d.PartyID
             WHERE t.ShortName IN ('BR','CR')
               AND ISNULL(h.Cancelled,'N') <> 'Y'
-              AND d.DrCrIndicator='C' AND LEFT(d.PartyID,1)='D'
+              AND d.DrCrIndicator='D' AND LEFT(d.PartyID,1)='D'
               {date_filter}
             GROUP BY p.PartyName
             ORDER BY collections DESC
@@ -179,7 +180,7 @@ def render():
         JOIN MsTransType t ON t.id_key=h.TransTypeID
         WHERE t.ShortName IN ('BR','CR')
           AND ISNULL(h.Cancelled,'N') <> 'Y'
-          AND d.DrCrIndicator='C' AND LEFT(d.PartyID,1)='D' {_12m}
+          AND d.DrCrIndicator='D' AND LEFT(d.PartyID,1)='D' {_12m}
         GROUP BY YEAR(h.VoucherDate), MONTH(h.VoucherDate)
     """)
     if not df_eff_s.empty:
