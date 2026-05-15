@@ -1,64 +1,82 @@
 import streamlit as st
 import pandas as pd
 from db import query
-from config import PURCHASE_IN, PURCHASE_ALL_IN, NOT_CANCELLED, NOT_FREE, COLORS
+from config import NOT_CANCELLED, COLORS
 from utils import fmt_inr, fmt_qty, month_col, scale_cr
 from components.kpi_cards import kpi_row
 from components.charts import bar_chart, grouped_bar, pie_chart
-
-
-RECEIPT_CODES = ("'BR'", "'CR'")
-PAYMENT_CODES = ("'BP'", "'CE'")
-RECEIPT_IN    = ",".join(RECEIPT_CODES)
-PAYMENT_IN    = ",".join(PAYMENT_CODES)
 
 
 def render():
     st.header("Balance Sheet & Financial Summary")
     date_filter = st.session_state.get("date_filter", "")
     cutoff      = st.session_state.get("outstanding_cutoff")
-    cutoff_sql  = f"AND COALESCE(h.TPDate, h.VoucherDate) < '{cutoff}'" if cutoff else ""
     bal_col     = "CloseBal" if cutoff else "CloseBalTmp"
 
     st.info(
-        "This tab provides a management-level financial summary derived from "
-        "voucher data. For audited financials, refer to the official balance sheet.",
+        "Figures read directly from ERP GL accounts (TrVocDetail by AccHeadID) "
+        "and pre-computed period balances (MsAcHeadOpening). "
+        "Should match ERP Trading Account and Balance Sheet reports exactly.",
         icon="ℹ️"
     )
 
     # ── Top-line summary ──────────────────────────────────────────────────────
-    # Revenue = MS sales invoices (matches ERP Trading A/C "SALES" line)
-    # COGS    = PU purchases + excise duty (BP/CE carrying stock items)
-    # Opening stock = MsItemBatchOpening.OpeningQty × ValuationBottleRate
-    #   (ERP Trading A/C debit side shows OPENING STOCK ₹39.88 Cr)
-    pl = query(f"""
-        SELECT
-            SUM(CASE WHEN t.ShortName='MS'                      AND ISNULL(i.FreeItemYN,'N')<>'Y' THEN i.TotalAmount ELSE 0 END) AS revenue,
-            SUM(CASE WHEN h.TransTypeID IN ({PURCHASE_ALL_IN}) AND ISNULL(i.FreeItemYN,'N')<>'Y' THEN i.TotalAmount ELSE 0 END) AS cogs
-        FROM TrVocHead h
-        JOIN TrVocItem i ON i.TransTypeID=h.TransTypeID AND i.VoucherNo=h.VoucherNo
-        JOIN MsTransType t ON t.id_key=h.TransTypeID
-        WHERE (t.ShortName='MS' OR h.TransTypeID IN ({PURCHASE_ALL_IN}))
-          {NOT_CANCELLED} {date_filter}
+    # All figures from GL posting table (TrVocDetail), mirroring how ERP computes
+    # the Trading Account. Each line maps to the exact account in MsAccountHead.
+    rev_q = query(f"""
+        SELECT SUM(d.Amount) AS revenue
+        FROM TrVocDetail d
+        JOIN TrVocHead h ON h.TransTypeID=d.TransTypeID AND h.VoucherNo=d.VoucherNo
+        WHERE d.PartyID = '000004'
+          AND d.DrCrIndicator = 'C'
+          AND ISNULL(h.Cancelled,'N') <> 'Y'
+          {date_filter}
     """)
-    # Opening stock from MsItemBatchOpening.OpeningQty × ValuationBottleRate
+    pur_q = query(f"""
+        SELECT SUM(d.Amount) AS purchases
+        FROM TrVocDetail d
+        JOIN TrVocHead h ON h.TransTypeID=d.TransTypeID AND h.VoucherNo=d.VoucherNo
+        WHERE d.PartyID = '000005'
+          AND d.DrCrIndicator = 'D'
+          AND ISNULL(h.Cancelled,'N') <> 'Y'
+          {date_filter}
+    """)
+    exc_q = query(f"""
+        SELECT SUM(d.Amount) AS excise
+        FROM TrVocDetail d
+        JOIN TrVocHead h ON h.TransTypeID=d.TransTypeID AND h.VoucherNo=d.VoucherNo
+        JOIN MsAccountHead a ON a.AccHeadID = d.PartyID
+        WHERE a.AccHeadName LIKE '%EXCISE DUTY%'
+          AND d.DrCrIndicator = 'D'
+          AND ISNULL(h.Cancelled,'N') <> 'Y'
+          {date_filter}
+    """)
+    ssr_q = query(f"""
+        SELECT SUM(d.Amount) AS sales_scheme
+        FROM TrVocDetail d
+        JOIN TrVocHead h ON h.TransTypeID=d.TransTypeID AND h.VoucherNo=d.VoucherNo
+        JOIN MsAccountHead a ON a.AccHeadID = d.PartyID
+        WHERE a.AccHeadName LIKE '%SALES SCHEME%'
+          AND d.DrCrIndicator = 'C'
+          AND ISNULL(h.Cancelled,'N') <> 'Y'
+          {date_filter}
+    """)
     opening_stock_q = query("""
         SELECT SUM(ob.OpeningQty * m.ValuationBottleRate) AS opening_stock
         FROM MsItemBatchOpening ob
         JOIN MsItemMaster m ON m.ItemID = ob.ItemID
         WHERE ob.OpeningQty > 0
     """)
-    # Receivables from MsPartyOpening — matches ERP debtor closing balance exactly
+    # Debtors and Creditors from GL control account pre-computed balances
     recv_q = query(f"""
-        SELECT SUM({bal_col}) AS receivables
-        FROM MsPartyOpening
-        WHERE LEFT(PartyID, 1) = 'D'
+        SELECT {bal_col} AS receivables
+        FROM MsAcHeadOpening
+        WHERE AccHeadID = '000002'
     """)
-    pay_q = query(f"""
-        SELECT SUM(ABS({bal_col})) AS payables
-        FROM MsPartyOpening
-        WHERE LEFT(PartyID, 1) = 'C'
-          AND {bal_col} < 0
+    cred_q = query(f"""
+        SELECT ABS({bal_col}) AS payables
+        FROM MsAcHeadOpening
+        WHERE AccHeadID = '000003'
     """)
     stock_val = query("""
         SELECT
@@ -69,39 +87,45 @@ def render():
         WHERE ob.ClosingQty > 0
     """)
 
-    rev_val      = float(pl["revenue"][0]                        or 0)
-    cogs_val     = float(pl["cogs"][0]                           or 0)
-    recv_val     = float(recv_q["receivables"][0]                or 0)
-    pay_val      = float(pay_q["payables"][0]                    or 0)
-    open_stk_val = float(opening_stock_q["opening_stock"][0]     or 0)
-    clos_stk_val = float(stock_val["val_amt"][0]                 or 0)
-    # Trading A/C: GP = Revenue − (COGS + Opening Stock − Closing Stock)
-    gross_profit = rev_val - (cogs_val + open_stk_val - clos_stk_val)
-    gp_pct = (gross_profit / rev_val * 100) if rev_val else 0
+    rev_val      = float(rev_q["revenue"][0]               or 0) if not rev_q.empty else 0
+    pur_val      = float(pur_q["purchases"][0]              or 0) if not pur_q.empty else 0
+    exc_val      = float(exc_q["excise"][0]                 or 0) if not exc_q.empty else 0
+    ssr_val      = float(ssr_q["sales_scheme"][0]           or 0) if not ssr_q.empty else 0
+    recv_val     = float(recv_q["receivables"][0]           or 0) if not recv_q.empty else 0
+    pay_val      = float(cred_q["payables"][0]              or 0) if not cred_q.empty else 0
+    open_stk_val = float(opening_stock_q["opening_stock"][0] or 0) if not opening_stock_q.empty else 0
+    clos_stk_val = float(stock_val["val_amt"][0]            or 0) if not stock_val.empty else 0
+
+    cogs_val     = pur_val + exc_val
+    total_income = rev_val + ssr_val
+    gross_profit = total_income - (cogs_val + open_stk_val - clos_stk_val)
+    gp_pct = (gross_profit / total_income * 100) if total_income else 0
 
     kpi_row([
-        {"label": "Revenue (Sales)",    "value": rev_val,        "fmt": "inr"},
-        {"label": "Purchases + Excise", "value": cogs_val,       "fmt": "inr"},
-        {"label": "Gross Profit",       "value": gross_profit,   "fmt": "inr",
+        {"label": "Revenue (Sales)",       "value": rev_val,      "fmt": "inr"},
+        {"label": "Sales Scheme Receipt",  "value": ssr_val,      "fmt": "inr"},
+        {"label": "Purchases",             "value": pur_val,      "fmt": "inr"},
+        {"label": "Excise Duty",           "value": exc_val,      "fmt": "inr"},
+        {"label": "Gross Profit",          "value": gross_profit, "fmt": "inr",
          "delta": f"{gp_pct:.1f}% GP%"},
-        {"label": "Receivables",        "value": recv_val,       "fmt": "inr"},
-        {"label": "Payables",           "value": pay_val,        "fmt": "inr"},
-        {"label": "Closing Stock",      "value": clos_stk_val,   "fmt": "inr"},
+        {"label": "Closing Stock",         "value": clos_stk_val, "fmt": "inr"},
     ])
 
     st.divider()
 
-    # ── Trading Account summary (mirrors ERP Trading A/C) ────────────────────
+    # ── Trading Account summary (mirrors ERP Trading A/C exactly) ───────────
     st.subheader("Trading Account")
     trd_rows = [
-        ("Sales (MS invoices)",   rev_val,       "Credit"),
-        ("Opening Stock",         open_stk_val,  "Debit — MsItemBatchOpening"),
-        ("Purchases + Excise",    cogs_val,      "Debit — PU + BP/CE types"),
-        ("Closing Stock",         clos_stk_val,  "Credit — MsItemBatchOpening"),
-        ("Gross Profit",          gross_profit,  f"{gp_pct:.1f}% on Sales"),
-        ("Receivables (Debtors)", recv_val,      "MsPartyOpening D%"),
-        ("Payables (Creditors)",  pay_val,       "MsPartyOpening C%"),
-        ("Net Working Capital",   recv_val + clos_stk_val - pay_val, ""),
+        ("Sales (GL 000004)",          rev_val,       "CR to SALES account"),
+        ("Sales Scheme Receipt",       ssr_val,       "CR to SALES SCHEME account"),
+        ("Less: Opening Stock",        open_stk_val,  "MsItemBatchOpening.OpeningQty × ValuationBottleRate"),
+        ("Less: Purchases (GL 000005)", pur_val,      "DR to PURCHASES-TRADING account"),
+        ("Less: Excise Duty",          exc_val,       "DR to EXCISE DUTY account(s)"),
+        ("Add: Closing Stock",         clos_stk_val,  "MsItemBatchOpening.ClosingQty × ValuationBottleRate"),
+        ("Gross Profit",               gross_profit,  f"{gp_pct:.1f}% on Sales+SSR"),
+        ("Receivables (Debtors)",      recv_val,      "MsAcHeadOpening GL 000002"),
+        ("Payables (Creditors)",       pay_val,       "MsAcHeadOpening GL 000003"),
+        ("Net Working Capital",        recv_val + clos_stk_val - pay_val, "Receivables + Stock − Payables"),
     ]
     df_pl = pd.DataFrame(trd_rows, columns=["Item", "Amount", "Note"])
     df_pl["Amount"] = df_pl["Amount"].apply(fmt_inr)
@@ -113,14 +137,14 @@ def render():
     st.subheader("Monthly Revenue vs Cost of Goods")
     df_trend = query(f"""
         SELECT
-            YEAR(COALESCE(h.TPDate, h.VoucherDate)) AS yr, MONTH(COALESCE(h.TPDate, h.VoucherDate)) AS mo,
-            SUM(CASE WHEN t.ShortName='MS'                       THEN i.TotalAmount ELSE 0 END) AS revenue,
-            SUM(CASE WHEN h.TransTypeID IN ({PURCHASE_ALL_IN})  THEN i.TotalAmount ELSE 0 END) AS cogs
-        FROM TrVocHead h
-        JOIN TrVocItem i ON i.TransTypeID=h.TransTypeID AND i.VoucherNo=h.VoucherNo
-        JOIN MsTransType t ON t.id_key=h.TransTypeID
-        WHERE (t.ShortName='MS' OR h.TransTypeID IN ({PURCHASE_ALL_IN}))
-          {NOT_CANCELLED} AND ISNULL(i.FreeItemYN,'N') <> 'Y'
+            YEAR(COALESCE(h.TPDate, h.VoucherDate)) AS yr,
+            MONTH(COALESCE(h.TPDate, h.VoucherDate)) AS mo,
+            SUM(CASE WHEN d.PartyID='000004' AND d.DrCrIndicator='C' THEN d.Amount ELSE 0 END) AS revenue,
+            SUM(CASE WHEN d.PartyID='000005' AND d.DrCrIndicator='D' THEN d.Amount ELSE 0 END) AS cogs
+        FROM TrVocDetail d
+        JOIN TrVocHead h ON h.TransTypeID=d.TransTypeID AND h.VoucherNo=d.VoucherNo
+        WHERE d.PartyID IN ('000004','000005')
+          AND ISNULL(h.Cancelled,'N') <> 'Y'
           {date_filter}
         GROUP BY YEAR(COALESCE(h.TPDate, h.VoucherDate)), MONTH(COALESCE(h.TPDate, h.VoucherDate))
         ORDER BY yr, mo

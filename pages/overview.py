@@ -1,7 +1,7 @@
 import streamlit as st
 import plotly.graph_objects as go
 from db import query
-from config import SALES_IN, PURCHASE_IN, PURCHASE_ALL_IN, NOT_CANCELLED, NOT_FREE, COLORS
+from config import NOT_CANCELLED, NOT_FREE, COLORS
 from utils import fmt_inr, fmt_qty, month_col
 from components.kpi_cards import kpi_row
 from components.charts import grouped_bar, bar_chart, pie_chart
@@ -15,23 +15,18 @@ def render():
     st.divider()
 
     # ── KPIs ──────────────────────────────────────────────────────────────────
-    # Total Sales from TrVocItem (product-level, excludes free items).
-    # Combined query also fetches purchases to save a round-trip.
-    # Purchases = company invoices (PU) + excise duty paid to Maharashtra govt (BP/CE).
-    # For out-of-state/imported goods, companies invoice ex-excise; KWPL pays excise
-    # separately via bank/cash — those BP/CE vouchers carry TrVocItem lines tracking
-    # the exact bottles. Balance sheet Purchases ≈ PU + BP + CE TrVocItem ≈ ₹432 Cr.
+    # Sales and Purchases from GL posting table — matches ERP Trading Account exactly.
+    # Sales  = CR postings to GL 000004 (SALES account).
+    # Purchases = DR postings to GL 000005 (PURCHASES-TRADING account).
     kpi_vol = query(f"""
         SELECT
-            SUM(CASE WHEN t.ShortName='MS'
-                     AND ISNULL(i.FreeItemYN,'N')<>'Y' THEN i.TotalAmount ELSE 0 END) AS total_sales,
-            SUM(CASE WHEN h.TransTypeID IN ({PURCHASE_ALL_IN})
-                     AND ISNULL(i.FreeItemYN,'N')<>'Y' THEN i.TotalAmount ELSE 0 END) AS total_purchases
-        FROM TrVocHead h
-        JOIN TrVocItem i ON i.TransTypeID=h.TransTypeID AND i.VoucherNo=h.VoucherNo
-        JOIN MsTransType t ON t.id_key=h.TransTypeID
-        WHERE (t.ShortName='MS' OR h.TransTypeID IN ({PURCHASE_ALL_IN}))
-          {NOT_CANCELLED} {date_filter}
+            SUM(CASE WHEN d.PartyID='000004' AND d.DrCrIndicator='C' THEN d.Amount ELSE 0 END) AS total_sales,
+            SUM(CASE WHEN d.PartyID='000005' AND d.DrCrIndicator='D' THEN d.Amount ELSE 0 END) AS total_purchases
+        FROM TrVocDetail d
+        JOIN TrVocHead h ON h.TransTypeID=d.TransTypeID AND h.VoucherNo=d.VoucherNo
+        WHERE d.PartyID IN ('000004','000005')
+          AND ISNULL(h.Cancelled,'N') <> 'Y'
+          {date_filter}
     """)
     # Invoice count: only vouchers with actual product lines (excludes accounting-only entries)
     kpi_cnt = query(f"""
@@ -54,12 +49,11 @@ def render():
         JOIN TrVocDetail d ON d.TransTypeID=v.TransTypeID AND d.VoucherNo=v.VoucherNo
         WHERE d.DrCrIndicator='D' AND LEFT(d.PartyID, 1) = 'D'
     """)
-    _cutoff  = st.session_state.get("outstanding_cutoff")
-    _bal_col = "CloseBal" if _cutoff else "CloseBalTmp"
-    kpi_os = query(f"""
-        SELECT SUM({_bal_col}) AS total_outstanding
-        FROM MsPartyOpening
-        WHERE LEFT(PartyID, 1) = 'D'
+    # Outstanding = Sundry Debtors Control (GL 000002) from MsAcHeadOpening
+    kpi_os = query("""
+        SELECT CloseBal AS total_outstanding
+        FROM MsAcHeadOpening
+        WHERE AccHeadID = '000002'
     """)
     # Stock from MsItemBatchOpening — ERP pre-computed live stock (ClosingQty).
     # Valued at ValuationBottleRate (balance-sheet rate, not MRP).
@@ -87,16 +81,14 @@ def render():
     st.subheader("Monthly Trend — Sales, Collections & Purchases")
     df_trend = query(f"""
         SELECT
-            YEAR(COALESCE(h.TPDate, h.VoucherDate)) AS yr, MONTH(COALESCE(h.TPDate, h.VoucherDate)) AS mo,
-            SUM(CASE WHEN t.ShortName='MS'
-                     THEN i.TotalAmount ELSE 0 END) AS sales,
-            SUM(CASE WHEN h.TransTypeID IN ({PURCHASE_ALL_IN})
-                     THEN i.TotalAmount ELSE 0 END) AS purchases
-        FROM TrVocHead h
-        JOIN TrVocItem i ON i.TransTypeID=h.TransTypeID AND i.VoucherNo=h.VoucherNo
-        JOIN MsTransType t ON t.id_key=h.TransTypeID
-        WHERE (t.ShortName='MS' OR h.TransTypeID IN ({PURCHASE_ALL_IN}))
-          {NOT_CANCELLED} AND ISNULL(i.FreeItemYN,'N')<>'Y'
+            YEAR(COALESCE(h.TPDate, h.VoucherDate)) AS yr,
+            MONTH(COALESCE(h.TPDate, h.VoucherDate)) AS mo,
+            SUM(CASE WHEN d.PartyID='000004' AND d.DrCrIndicator='C' THEN d.Amount ELSE 0 END) AS sales,
+            SUM(CASE WHEN d.PartyID='000005' AND d.DrCrIndicator='D' THEN d.Amount ELSE 0 END) AS purchases
+        FROM TrVocDetail d
+        JOIN TrVocHead h ON h.TransTypeID=d.TransTypeID AND h.VoucherNo=d.VoucherNo
+        WHERE d.PartyID IN ('000004','000005')
+          AND ISNULL(h.Cancelled,'N') <> 'Y'
           {date_filter}
         GROUP BY YEAR(COALESCE(h.TPDate, h.VoucherDate)), MONTH(COALESCE(h.TPDate, h.VoucherDate))
         ORDER BY yr, mo
