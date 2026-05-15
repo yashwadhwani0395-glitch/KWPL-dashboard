@@ -1,27 +1,145 @@
-# Transaction Type IDs — verified from live MsTransType table
-# MS (Sales): 1,6,7,11,13,15,16,17,20,23,24,25,26,32,33,35,47,51,52
+# ════════════════════════════════════════════════════════════════════════════
+# KWPL ERP — Confirmed constants from full schema survey + 300 diagnostics
+# CRITICAL: TrVocHead.TransTypeID references MsTransType.id_key (NOT TransTypeID)
+# CRITICAL: TrVocHead has NO PartyID and NO TotalAmount columns.
+#           Get party from TrVocDetail.PartyID. Get amounts from TrVocItem/TrVocDetail.
+# ════════════════════════════════════════════════════════════════════════════
+
+# ── Transaction Type IDs (id_key values from MsTransType) ────────────────────
+
+# All MS (Sales) id_keys — use ShortName filter 'MS' in queries for safety
 SALES_TYPES = (1, 6, 7, 11, 13, 15, 16, 17, 20, 23, 24, 25, 26, 32, 33, 35, 47, 51, 52)
 
-# PU = company purchase invoices.
-# Maharashtra excise law: local companies invoice including excise; out-of-state/
-# imported companies invoice ex-excise. Excise on imports is paid separately.
-# We need to confirm which TransTypeIDs carry that excise — pending diagnostic.
+# Active MS types in FY 2025-26 (confirmed from diagnostics)
+SALES_TYPES_ACTIVE = (11, 13, 20, 23, 26, 32, 35, 47, 51, 52)
+
+# All PU (Purchase) id_keys
 PURCHASE_TYPES = (8, 10, 14, 21, 22, 27, 28, 30, 31, 38, 49, 53)
 
+# Active PU types in FY 2025-26
+PURCHASE_TYPES_ACTIVE = (14, 21, 22, 27, 28, 30, 31, 38, 49, 53)
+
+# BP = Bank Payment. id_key 40 = main BP; 2,4,50 = old/return cheque banks.
+BP_TYPES = (2, 4, 40, 50)
+BP_MAIN  = 40   # Main Bank Payment
+
+# BR = Bank Receipt. id_key 41 = main BR; 3,5 = old banks.
+BR_TYPES = (3, 5, 41)
+BR_MAIN  = 41   # Main Bank Receipt
+
+# CE = Cash Expenses. id_key 18 = SHAH cash; 36 = SACHIN BHOSALE cash.
+CE_TYPES = (18, 36)
+
+# CR = Cash Receipt. id_key 37 = SACHIN; 43 = main.
+CR_TYPES = (37, 43)
+
+# LD = Load/Demo dispatches. id_key 19 = LOAD DEMO; 39 = LOAD.
+LD_TYPES = (19, 39)
+
+# SA = Breakages/Write-offs. id_key 9 = transport; 29 = tonic water; 42 = main.
+SA_TYPES = (9, 29, 42)
+
+# DN = Debit Note. 12 = to customers (SALES); 46 = from suppliers (PURCH).
+DN_TYPES      = (12, 46)
+DN_SALES_TYPE = 12    # Debit note charged to customer
+DN_PURCH_TYPE = 46    # Debit note from supplier (claim)
+
+# CN = Credit Note. 44 = from supplier (PURCH); 45 = to customer (SALES).
+CN_TYPES      = (44, 45)
+CN_SALES_TYPE = 45    # Credit note given to customer
+CN_PURCH_TYPE = 44    # Credit note received from supplier
+
+# Other types
+SO_TYPE  = 34   # Sales Order (no stock/accounting effect, PostingYN='N')
+RO_TYPE  = 54   # Receipt Order
+JV_TYPE  = 48   # Journal Voucher
+
+# ── SQL filter fragments ──────────────────────────────────────────────────────
 RECEIPT_CODES = ('BR', 'CR')
 PAYMENT_CODES = ('BP', 'CE')
 
 SALES_IN      = ",".join(str(x) for x in SALES_TYPES)
 PURCHASE_IN   = ",".join(str(x) for x in PURCHASE_TYPES)
-# BP (40) + CE (18) carry excise duty on imported goods — balance sheet purchases
-# = PU ₹183 Cr + BP ₹100 Cr + CE ₹147 Cr ≈ ₹432 Cr (matches ERP balance sheet).
-# PURCHASE_ALL_IN is for the P&L purchases KPI only; PURCHASE_IN stays for stock.
-EXCISE_TYPES    = (40, 18)
+
+# BP (40) + CE (18,36) carry excise duty on imported goods — used for P&L purchases KPI
+EXCISE_TYPES    = (40, 18, 36)
 PURCHASE_ALL_IN = PURCHASE_IN + "," + ",".join(str(x) for x in EXCISE_TYPES)
 
-# SQL filter fragments — ISNULL handles vouchers where field is NULL (not just 'N')
+# Standard SQL clauses
 NOT_CANCELLED = "AND ISNULL(h.Cancelled,'N') <> 'Y'"
 NOT_FREE      = "AND ISNULL(i.FreeItemYN,'N') <> 'Y'"
+
+# FY 2025-26 date range
+FY_START = "2025-04-01"
+FY_END   = "2026-04-01"   # exclusive upper bound (< this date)
+
+# ── Party prefix helpers ──────────────────────────────────────────────────────
+# D% = customers (debtors), C% = suppliers (creditors), others = GL accounts
+CUSTOMER_PREFIX  = "D"
+SUPPLIER_PREFIX  = "C"
+
+# ── COA / Account nature (MsAccountHead.MainHeadType) ────────────────────────
+# Used for P&L and Balance Sheet categorisation
+COA_DEBTORS    = (1, 7)    # Debtor control accounts → current assets
+COA_CREDITORS  = (2, 8)    # Creditor control accounts → current liabilities
+COA_INCOME_OTHER = (3,)    # Other income
+COA_EXPENDITURE = (4,)     # Operating expenses
+COA_PURCHASES  = (5,)      # Purchases / COGS
+COA_SALES      = (6,)      # Sales revenue
+COA_STOCK      = (9,)      # Stock / inventory accounts
+COA_OTHER      = (10, 11)  # Misc / cancelled
+
+# Key GL account IDs (confirmed from MsAccountHead)
+GL_DEBTORS_CONTROL  = "000002"   # SUNDRY DEBTORS CONTROL
+GL_CREDITORS_CONTROL = "000003"  # SUNDRY CREDITORS CONTROL
+GL_SALES            = "000004"   # SALES
+GL_PURCHASES        = "000005"   # PURCHASES - TRADING
+
+# ── Rate columns (confirmed from MsItemMaster + MsItemRates) ─────────────────
+# MsItemRates is the canonical dated rate table (use for current rates):
+#   SaleBottleRate / SaleCaseRate      → current effective sale rate to retailers
+#   PurchaseBottleRate / PurchaseCaseRate → current effective purchase rate
+#   ApplyDate                           → effective from this date
+#
+# MsItemMaster rate columns:
+#   ValuationBottleRate / ValuationCaseRate → stock valuation rate (balance sheet)
+#   MrpBottRate / MrpCaseRate               → government MRP (retail price ceiling)
+#   ExciseDutyCaseRate / ExciseDutyBottleRate → excise duty per item
+#
+# TrVocItem.BottleRate / CaseRate → ACTUAL rate used in each transaction
+
+# ── Stock columns (confirmed from MsItemBatchOpening) ────────────────────────
+# Use ClosingQtyTmp for LIVE stock, ClosingQty for FY-end computed stock.
+# FOpeningQty / FQtyIn / FQtyOut / FClosingQty → free-goods stock tracked separately.
+# Group by ItemID (records are at BranchID + ItemID + BatchID level).
+
+# ── Balance columns (confirmed from MsPartyOpening) ──────────────────────────
+# Use CloseBalTmp for LIVE outstanding, CloseBal for FY-end balance.
+# Sign convention: positive = KWPL is owed money (debit balance = customer owes).
+
+# ── TCS tracking tables ───────────────────────────────────────────────────────
+# TrVocTCS        → one row per voucher: TCSPercent, PayedYN, challan details
+# MsPartyTCSLimit → per-party TCS rate by financial year (FromDate, ToDate)
+# S00026 in TrVocItem → TCS line on each MS invoice (TotalAmount = TCS charged)
+
+# ── Service item IDs (MsServiceItemMaster) ───────────────────────────────────
+SI_TCS             = "S00026"   # T.C.S. 2%. — charged on invoice
+SI_EXCISE          = "S00021"   # Excise Duty
+SI_HANDLING        = "S00006"   # Add Incidental Charges (transport/handling)
+SI_PRODUCT_DISC    = "S00005"   # Product Discount
+SI_CASH_DISC_2PCT  = "S00002"   # Cash Discount 2%
+SI_CASH_DISC_1PCT  = "S00008"   # Cash Discount 1%
+SI_SPECIAL_DISC    = "S00054"   # Special Discount
+SI_TRADE_DISC_PU   = "S00014"   # Trade Discount (Purchase)
+SI_VEND_FEE        = "S00007"   # Vend Fee
+
+# ── TrVocHead column truth ────────────────────────────────────────────────────
+# CONFIRMED PRESENT:   TransTypeID, VoucherDate, VoucherNo, Narration,
+#                      VoucherFlag, UserID, DueDate, TPNo, TPDate, Cancelled,
+#                      SalesManID, FinancialYear, VehicleNumber, Address, InvoiceNo
+# CONFIRMED ABSENT:    PartyID, TotalAmount
+# Get party via:       TrVocDetail.PartyID (D% or C% prefix)
+# Get sale amount via: SUM(i.TotalAmount) FROM TrVocItem WHERE NOT FreeItemYN
 
 # ── Brand → Principal mapping (verified from live brands.csv) ─────────────────
 # BrandIDs for each principal — used to generate SQL CASE statements
