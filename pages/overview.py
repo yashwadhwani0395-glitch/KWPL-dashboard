@@ -61,15 +61,15 @@ def render():
         FROM MsPartyOpening
         WHERE LEFT(PartyID, 1) = 'D'
     """)
-    # Stock from MsItemBatchOpening — ERP pre-computed live stock (ClosingQtyTmp).
+    # Stock from MsItemBatchOpening — ERP pre-computed live stock (ClosingQty).
     # Valued at ValuationBottleRate (balance-sheet rate, not MRP).
     stock_val = query("""
         SELECT
-            SUM(ob.ClosingQtyTmp)                                  AS stock_bottles,
-            SUM(ob.ClosingQtyTmp * m.ValuationBottleRate)          AS stock_value
+            SUM(ob.ClosingQty)                                  AS stock_bottles,
+            SUM(ob.ClosingQty * m.ValuationBottleRate)          AS stock_value
         FROM MsItemBatchOpening ob
         JOIN MsItemMaster m ON m.ItemID = ob.ItemID
-        WHERE ob.ClosingQtyTmp > 0
+        WHERE ob.ClosingQty > 0
     """)
 
     kpi_row([

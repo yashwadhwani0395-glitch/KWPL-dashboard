@@ -62,11 +62,11 @@ def render():
     """)
     stock_val = query("""
         SELECT
-            SUM(ob.ClosingQtyTmp * m.ValuationBottleRate) AS val_amt,
-            SUM(ob.ClosingQtyTmp)                          AS bottles
+            SUM(ob.ClosingQty * m.ValuationBottleRate) AS val_amt,
+            SUM(ob.ClosingQty)                          AS bottles
         FROM MsItemBatchOpening ob
         JOIN MsItemMaster m ON m.ItemID = ob.ItemID
-        WHERE ob.ClosingQtyTmp > 0
+        WHERE ob.ClosingQty > 0
     """)
 
     rev_val      = float(pl["revenue"][0]                        or 0)

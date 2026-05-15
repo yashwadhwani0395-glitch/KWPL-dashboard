@@ -31,11 +31,11 @@ def render():
     """)
     stock = query("""
         SELECT COUNT(DISTINCT ob.ItemID)                      AS sku_count,
-               SUM(ob.ClosingQtyTmp)                          AS total_bottles,
-               SUM(ob.ClosingQtyTmp * m.ValuationBottleRate)  AS stock_val
+               SUM(ob.ClosingQty)                          AS total_bottles,
+               SUM(ob.ClosingQty * m.ValuationBottleRate)  AS stock_val
         FROM MsItemBatchOpening ob
         JOIN MsItemMaster m ON m.ItemID = ob.ItemID
-        WHERE ob.ClosingQtyTmp > 0
+        WHERE ob.ClosingQty > 0
     """)
     kpi_row([
         {"label": "Purchase Invoices",          "value": pur["invoices"][0],              "fmt": "qty"},
@@ -131,11 +131,11 @@ def render():
     """)
     df_br_stk = query("""
         SELECT b.BrandName AS brand,
-               SUM(ob.ClosingQtyTmp) AS stock_bottles
+               SUM(ob.ClosingQty) AS stock_bottles
         FROM MsItemBatchOpening ob
         JOIN MsItemMaster m ON m.ItemID = ob.ItemID
         JOIN MsBrandMaster b ON b.BrandID = m.BrandID
-        WHERE ob.ClosingQtyTmp > 0
+        WHERE ob.ClosingQty > 0
         GROUP BY b.BrandName
         ORDER BY stock_bottles DESC
     """)
@@ -161,12 +161,12 @@ def render():
     df_stk_detail = query("""
         SELECT b.BrandName AS brand,
                COUNT(DISTINCT ob.ItemID) AS skus,
-               SUM(ob.ClosingQtyTmp) AS bottles,
-               SUM(ob.ClosingQtyTmp * m.ValuationBottleRate) AS val_value
+               SUM(ob.ClosingQty) AS bottles,
+               SUM(ob.ClosingQty * m.ValuationBottleRate) AS val_value
         FROM MsItemBatchOpening ob
         JOIN MsItemMaster m ON m.ItemID = ob.ItemID
         JOIN MsBrandMaster b ON b.BrandID = m.BrandID
-        WHERE ob.ClosingQtyTmp > 0
+        WHERE ob.ClosingQty > 0
         GROUP BY b.BrandName
         ORDER BY val_value DESC
     """)
