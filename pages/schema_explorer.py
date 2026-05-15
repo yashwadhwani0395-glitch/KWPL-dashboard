@@ -5138,8 +5138,9 @@ def render():
                         results[title] = pd.DataFrame([{"ERROR": str(e)}])
                 progress.empty()
                 st.session_state["diag_results"] = results
-                buf = io.BytesIO()
-                with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+                import io as _dio, zipfile as _dzf
+                buf = _dio.BytesIO()
+                with _dzf.ZipFile(buf, "w", _dzf.ZIP_DEFLATED) as zf:
                     for title, df in results.items():
                         safe = title.replace(" ", "_").replace("—", "-")[:50]
                         zf.writestr(f"{safe}.csv", df.to_csv(index=False))
