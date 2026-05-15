@@ -11,7 +11,7 @@ def render():
     st.header("Debtors & Outstanding")
     date_filter = st.session_state.get("date_filter", "")
     cutoff      = st.session_state.get("outstanding_cutoff")           # None = today
-    cutoff_sql  = f"AND h.VoucherDate < '{cutoff}'" if cutoff else ""
+    cutoff_sql  = f"AND COALESCE(h.TPDate, h.VoucherDate) < '{cutoff}'" if cutoff else ""
     # CloseBal = FY end (31.03.2026); CloseBalTmp = running current balance
     bal_col     = "CloseBal" if cutoff else "CloseBalTmp"
 

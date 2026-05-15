@@ -87,7 +87,7 @@ def render():
     st.subheader("Monthly Trend — Sales, Collections & Purchases")
     df_trend = query(f"""
         SELECT
-            YEAR(h.VoucherDate) AS yr, MONTH(h.VoucherDate) AS mo,
+            YEAR(COALESCE(h.TPDate, h.VoucherDate)) AS yr, MONTH(COALESCE(h.TPDate, h.VoucherDate)) AS mo,
             SUM(CASE WHEN t.ShortName='MS'
                      THEN i.TotalAmount ELSE 0 END) AS sales,
             SUM(CASE WHEN h.TransTypeID IN ({PURCHASE_ALL_IN})
@@ -98,13 +98,13 @@ def render():
         WHERE (t.ShortName='MS' OR h.TransTypeID IN ({PURCHASE_ALL_IN}))
           {NOT_CANCELLED} AND ISNULL(i.FreeItemYN,'N')<>'Y'
           {date_filter}
-        GROUP BY YEAR(h.VoucherDate), MONTH(h.VoucherDate)
+        GROUP BY YEAR(COALESCE(h.TPDate, h.VoucherDate)), MONTH(COALESCE(h.TPDate, h.VoucherDate))
         ORDER BY yr, mo
     """)
     # BR/CR vouchers in this ERP debit the customer (DR=D%) when cash is received —
     # opposite to standard convention. Collections = DrCrIndicator='D' on D% in BR/CR.
     df_coll = query(f"""
-        SELECT YEAR(h.VoucherDate) AS yr, MONTH(h.VoucherDate) AS mo,
+        SELECT YEAR(COALESCE(h.TPDate, h.VoucherDate)) AS yr, MONTH(COALESCE(h.TPDate, h.VoucherDate)) AS mo,
                SUM(d.Amount) AS collections
         FROM TrVocDetail d
         JOIN TrVocHead h ON h.TransTypeID=d.TransTypeID AND h.VoucherNo=d.VoucherNo
@@ -113,7 +113,7 @@ def render():
           AND ISNULL(h.Cancelled,'N') <> 'Y'
           AND d.DrCrIndicator='D' AND LEFT(d.PartyID, 1) = 'D'
           {date_filter}
-        GROUP BY YEAR(h.VoucherDate), MONTH(h.VoucherDate)
+        GROUP BY YEAR(COALESCE(h.TPDate, h.VoucherDate)), MONTH(COALESCE(h.TPDate, h.VoucherDate))
         ORDER BY yr, mo
     """)
 
@@ -192,7 +192,7 @@ def render():
     # ── Monthly Sales by Company (stacked) ────────────────────────────────────
     st.subheader("Monthly Sales by Company")
     df_pm = query(f"""
-        SELECT YEAR(h.VoucherDate) AS yr, MONTH(h.VoucherDate) AS mo,
+        SELECT YEAR(COALESCE(h.TPDate, h.VoucherDate)) AS yr, MONTH(COALESCE(h.TPDate, h.VoucherDate)) AS mo,
                COALESCE(p.PartyName,'Others') AS company,
                SUM(i.TotalAmount) AS sales
         FROM TrVocHead h
@@ -202,7 +202,7 @@ def render():
         LEFT JOIN MsBrandMaster b ON b.BrandID=m.BrandID
         LEFT JOIN MsPartyMaster p ON p.PartyID=b.CompanyID
         WHERE t.ShortName='MS' {NOT_CANCELLED} {NOT_FREE} {date_filter}
-        GROUP BY YEAR(h.VoucherDate), MONTH(h.VoucherDate), COALESCE(p.PartyName,'Others')
+        GROUP BY YEAR(COALESCE(h.TPDate, h.VoucherDate)), MONTH(COALESCE(h.TPDate, h.VoucherDate)), COALESCE(p.PartyName,'Others')
         ORDER BY yr, mo
     """)
 

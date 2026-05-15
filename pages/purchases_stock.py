@@ -54,13 +54,13 @@ def render():
     with col_l:
         st.subheader("Monthly Purchase Trend")
         df_m = query(f"""
-            SELECT YEAR(h.VoucherDate) AS yr, MONTH(h.VoucherDate) AS mo,
+            SELECT YEAR(COALESCE(h.TPDate, h.VoucherDate)) AS yr, MONTH(COALESCE(h.TPDate, h.VoucherDate)) AS mo,
                    SUM(i.TotalAmount) AS purchases
             FROM TrVocHead h
             JOIN TrVocItem i ON i.TransTypeID=h.TransTypeID AND i.VoucherNo=h.VoucherNo
             WHERE h.TransTypeID IN ({PURCHASE_ALL_IN}) {NOT_CANCELLED} {NOT_FREE}
               {date_filter}
-            GROUP BY YEAR(h.VoucherDate), MONTH(h.VoucherDate) ORDER BY yr, mo
+            GROUP BY YEAR(COALESCE(h.TPDate, h.VoucherDate)), MONTH(COALESCE(h.TPDate, h.VoucherDate)) ORDER BY yr, mo
         """)
         if not df_m.empty:
             df_m = month_col(df_m)

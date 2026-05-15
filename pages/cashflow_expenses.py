@@ -61,7 +61,7 @@ def render():
     # ── Monthly collections vs payments ──────────────────────────────────────
     st.subheader("Monthly Collections vs Payments")
     df_coll_m = query(f"""
-        SELECT YEAR(h.VoucherDate) AS yr, MONTH(h.VoucherDate) AS mo,
+        SELECT YEAR(COALESCE(h.TPDate, h.VoucherDate)) AS yr, MONTH(COALESCE(h.TPDate, h.VoucherDate)) AS mo,
                SUM(d.Amount) AS collections
         FROM TrVocDetail d
         JOIN TrVocHead h  ON h.TransTypeID=d.TransTypeID AND h.VoucherNo=d.VoucherNo
@@ -70,11 +70,11 @@ def render():
           AND ISNULL(h.Cancelled,'N') <> 'Y'
           AND d.DrCrIndicator='D' AND LEFT(d.PartyID,1)='D'
           {date_filter}
-        GROUP BY YEAR(h.VoucherDate), MONTH(h.VoucherDate)
+        GROUP BY YEAR(COALESCE(h.TPDate, h.VoucherDate)), MONTH(COALESCE(h.TPDate, h.VoucherDate))
         ORDER BY yr, mo
     """)
     df_pay_m = query(f"""
-        SELECT YEAR(h.VoucherDate) AS yr, MONTH(h.VoucherDate) AS mo,
+        SELECT YEAR(COALESCE(h.TPDate, h.VoucherDate)) AS yr, MONTH(COALESCE(h.TPDate, h.VoucherDate)) AS mo,
                SUM(d.Amount) AS payments
         FROM TrVocDetail d
         JOIN TrVocHead h  ON h.TransTypeID=d.TransTypeID AND h.VoucherNo=d.VoucherNo
@@ -83,7 +83,7 @@ def render():
           AND ISNULL(h.Cancelled,'N') <> 'Y'
           AND d.DrCrIndicator='D'
           {date_filter}
-        GROUP BY YEAR(h.VoucherDate), MONTH(h.VoucherDate)
+        GROUP BY YEAR(COALESCE(h.TPDate, h.VoucherDate)), MONTH(COALESCE(h.TPDate, h.VoucherDate))
         ORDER BY yr, mo
     """)
     if not df_coll_m.empty:
@@ -161,19 +161,19 @@ def render():
 
     # ── Collection efficiency ─────────────────────────────────────────────────
     st.subheader("Collection Efficiency — Last 12 Months")
-    _12m = "AND h.VoucherDate >= DATEADD(MONTH,-12,GETDATE())"
+    _12m = "AND COALESCE(h.TPDate, h.VoucherDate) >= DATEADD(MONTH,-12,GETDATE())"
     df_eff_s = query(f"""
-        SELECT YEAR(h.VoucherDate) AS yr, MONTH(h.VoucherDate) AS mo,
+        SELECT YEAR(COALESCE(h.TPDate, h.VoucherDate)) AS yr, MONTH(COALESCE(h.TPDate, h.VoucherDate)) AS mo,
                SUM(i.TotalAmount) AS sales
         FROM TrVocHead h
         JOIN TrVocItem i ON i.TransTypeID=h.TransTypeID AND i.VoucherNo=h.VoucherNo
         JOIN MsTransType t ON t.id_key=h.TransTypeID
         WHERE t.ShortName='MS' AND ISNULL(h.Cancelled,'N') <> 'Y'
           AND ISNULL(i.FreeItemYN,'N') <> 'Y' {_12m}
-        GROUP BY YEAR(h.VoucherDate), MONTH(h.VoucherDate)
+        GROUP BY YEAR(COALESCE(h.TPDate, h.VoucherDate)), MONTH(COALESCE(h.TPDate, h.VoucherDate))
     """)
     df_eff_c = query(f"""
-        SELECT YEAR(h.VoucherDate) AS yr, MONTH(h.VoucherDate) AS mo,
+        SELECT YEAR(COALESCE(h.TPDate, h.VoucherDate)) AS yr, MONTH(COALESCE(h.TPDate, h.VoucherDate)) AS mo,
                SUM(d.Amount) AS collected
         FROM TrVocDetail d
         JOIN TrVocHead h ON h.TransTypeID=d.TransTypeID AND h.VoucherNo=d.VoucherNo
@@ -181,7 +181,7 @@ def render():
         WHERE t.ShortName IN ('BR','CR')
           AND ISNULL(h.Cancelled,'N') <> 'Y'
           AND d.DrCrIndicator='D' AND LEFT(d.PartyID,1)='D' {_12m}
-        GROUP BY YEAR(h.VoucherDate), MONTH(h.VoucherDate)
+        GROUP BY YEAR(COALESCE(h.TPDate, h.VoucherDate)), MONTH(COALESCE(h.TPDate, h.VoucherDate))
     """)
     if not df_eff_s.empty:
         df_eff_s = month_col(df_eff_s)

@@ -14,8 +14,12 @@ with st.sidebar:
     st.markdown("**Financial Year**")
     st.info("FY 2025-26\n\nApr 2025 – Mar 2026", icon="📅")
 
-    # Hardcoded to FY 2025-26 while verifying data accuracy
-    date_filter = " AND h.VoucherDate >= '2025-04-01' AND h.VoucherDate < '2026-04-01'"
+    # ERP reports use TPDate (Transport Permit date), not VoucherDate.
+    # COALESCE falls back to VoucherDate for voucher types that have no TPDate (BR/CR/BP/CE).
+    date_filter = (
+        " AND COALESCE(h.TPDate, h.VoucherDate) >= '2025-04-01'"
+        " AND COALESCE(h.TPDate, h.VoucherDate) < '2026-04-01'"
+    )
     st.session_state["date_filter"]        = date_filter
     st.session_state["outstanding_cutoff"] = "2026-04-01"   # → uses CloseBal
 

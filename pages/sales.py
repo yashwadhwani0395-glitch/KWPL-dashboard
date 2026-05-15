@@ -38,14 +38,14 @@ def render():
     with col_l:
         st.subheader("Monthly Sales Trend")
         df_m = query(f"""
-            SELECT YEAR(h.VoucherDate) AS yr, MONTH(h.VoucherDate) AS mo,
+            SELECT YEAR(COALESCE(h.TPDate, h.VoucherDate)) AS yr, MONTH(COALESCE(h.TPDate, h.VoucherDate)) AS mo,
                    SUM(i.TotalAmount) AS sales
             FROM TrVocHead h
             JOIN TrVocItem i ON i.TransTypeID=h.TransTypeID AND i.VoucherNo=h.VoucherNo
             JOIN MsTransType t ON t.id_key=h.TransTypeID
             WHERE t.ShortName='MS' {NOT_CANCELLED} {NOT_FREE}
               {date_filter}
-            GROUP BY YEAR(h.VoucherDate), MONTH(h.VoucherDate) ORDER BY yr, mo
+            GROUP BY YEAR(COALESCE(h.TPDate, h.VoucherDate)), MONTH(COALESCE(h.TPDate, h.VoucherDate)) ORDER BY yr, mo
         """)
         if not df_m.empty:
             df_m = month_col(df_m)
@@ -83,14 +83,14 @@ def render():
     # ── Daily last 30 days ────────────────────────────────────────────────────
     st.subheader("Daily Sales — Last 30 Days")
     df_d = query(f"""
-        SELECT CAST(h.VoucherDate AS DATE) AS sale_date,
+        SELECT CAST(COALESCE(h.TPDate, h.VoucherDate) AS DATE) AS sale_date,
                SUM(i.TotalAmount) AS sales
         FROM TrVocHead h
         JOIN TrVocItem i ON i.TransTypeID=h.TransTypeID AND i.VoucherNo=h.VoucherNo
         JOIN MsTransType t ON t.id_key=h.TransTypeID
         WHERE t.ShortName='MS' {NOT_CANCELLED} {NOT_FREE}
-          AND h.VoucherDate >= DATEADD(DAY,-30,GETDATE())
-        GROUP BY CAST(h.VoucherDate AS DATE) ORDER BY sale_date
+          AND COALESCE(h.TPDate, h.VoucherDate) >= DATEADD(DAY,-30,GETDATE())
+        GROUP BY CAST(COALESCE(h.TPDate, h.VoucherDate) AS DATE) ORDER BY sale_date
     """)
     if not df_d.empty:
         st.plotly_chart(bar_chart(df_d, x="sale_date", y="sales",

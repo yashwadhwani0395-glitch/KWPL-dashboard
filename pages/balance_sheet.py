@@ -17,7 +17,7 @@ def render():
     st.header("Balance Sheet & Financial Summary")
     date_filter = st.session_state.get("date_filter", "")
     cutoff      = st.session_state.get("outstanding_cutoff")
-    cutoff_sql  = f"AND h.VoucherDate < '{cutoff}'" if cutoff else ""
+    cutoff_sql  = f"AND COALESCE(h.TPDate, h.VoucherDate) < '{cutoff}'" if cutoff else ""
     bal_col     = "CloseBal" if cutoff else "CloseBalTmp"
 
     st.info(
@@ -27,6 +27,10 @@ def render():
     )
 
     # ── Top-line summary ──────────────────────────────────────────────────────
+    # Revenue = MS sales invoices (matches ERP Trading A/C "SALES" line)
+    # COGS    = PU purchases + excise duty (BP/CE carrying stock items)
+    # Opening stock = MsItemBatchOpening.OpeningQty × ValuationBottleRate
+    #   (ERP Trading A/C debit side shows OPENING STOCK ₹39.88 Cr)
     pl = query(f"""
         SELECT
             SUM(CASE WHEN t.ShortName='MS'                      AND ISNULL(i.FreeItemYN,'N')<>'Y' THEN i.TotalAmount ELSE 0 END) AS revenue,
@@ -36,6 +40,13 @@ def render():
         JOIN MsTransType t ON t.id_key=h.TransTypeID
         WHERE (t.ShortName='MS' OR h.TransTypeID IN ({PURCHASE_ALL_IN}))
           {NOT_CANCELLED} {date_filter}
+    """)
+    # Opening stock from MsItemBatchOpening.OpeningQty × ValuationBottleRate
+    opening_stock_q = query("""
+        SELECT SUM(ob.OpeningQty * m.ValuationBottleRate) AS opening_stock
+        FROM MsItemBatchOpening ob
+        JOIN MsItemMaster m ON m.ItemID = ob.ItemID
+        WHERE ob.OpeningQty > 0
     """)
     # Receivables from MsPartyOpening — matches ERP debtor closing balance exactly
     recv_q = query(f"""
@@ -58,36 +69,41 @@ def render():
         WHERE ob.ClosingQtyTmp > 0
     """)
 
-    rev_val  = float(pl["revenue"][0]           or 0)
-    cogs_val = float(pl["cogs"][0]              or 0)
-    recv_val = float(recv_q["receivables"][0]   or 0)
-    pay_val  = float(pay_q["payables"][0]       or 0)
-    gross_profit = rev_val - cogs_val
+    rev_val      = float(pl["revenue"][0]                        or 0)
+    cogs_val     = float(pl["cogs"][0]                           or 0)
+    recv_val     = float(recv_q["receivables"][0]                or 0)
+    pay_val      = float(pay_q["payables"][0]                    or 0)
+    open_stk_val = float(opening_stock_q["opening_stock"][0]     or 0)
+    clos_stk_val = float(stock_val["val_amt"][0]                 or 0)
+    # Trading A/C: GP = Revenue − (COGS + Opening Stock − Closing Stock)
+    gross_profit = rev_val - (cogs_val + open_stk_val - clos_stk_val)
     gp_pct = (gross_profit / rev_val * 100) if rev_val else 0
 
     kpi_row([
-        {"label": "Revenue (Sales)",   "value": rev_val,               "fmt": "inr"},
-        {"label": "Cost of Goods",     "value": cogs_val,              "fmt": "inr"},
-        {"label": "Gross Profit",      "value": gross_profit,          "fmt": "inr",
+        {"label": "Revenue (Sales)",    "value": rev_val,        "fmt": "inr"},
+        {"label": "Purchases + Excise", "value": cogs_val,       "fmt": "inr"},
+        {"label": "Gross Profit",       "value": gross_profit,   "fmt": "inr",
          "delta": f"{gp_pct:.1f}% GP%"},
-        {"label": "Receivables",       "value": recv_val,              "fmt": "inr"},
-        {"label": "Payables",          "value": pay_val,               "fmt": "inr"},
-        {"label": "Stock (Valuation)", "value": stock_val["val_amt"][0], "fmt": "inr"},
+        {"label": "Receivables",        "value": recv_val,       "fmt": "inr"},
+        {"label": "Payables",           "value": pay_val,        "fmt": "inr"},
+        {"label": "Closing Stock",      "value": clos_stk_val,   "fmt": "inr"},
     ])
 
     st.divider()
 
-    # ── P&L summary table ─────────────────────────────────────────────────────
-    st.subheader("P&L Summary")
-    pl_rows = [
-        ("Revenue",        rev_val,          ""),
-        ("Cost of Goods",  cogs_val,         ""),
-        ("Gross Profit",   gross_profit,     f"{gp_pct:.1f}%"),
-        ("Receivables",    recv_val,         ""),
-        ("Payables",       pay_val,          ""),
-        ("Net Position",   recv_val - pay_val, ""),
+    # ── Trading Account summary (mirrors ERP Trading A/C) ────────────────────
+    st.subheader("Trading Account")
+    trd_rows = [
+        ("Sales (MS invoices)",   rev_val,       "Credit"),
+        ("Opening Stock",         open_stk_val,  "Debit — MsItemBatchOpening"),
+        ("Purchases + Excise",    cogs_val,      "Debit — PU + BP/CE types"),
+        ("Closing Stock",         clos_stk_val,  "Credit — MsItemBatchOpening"),
+        ("Gross Profit",          gross_profit,  f"{gp_pct:.1f}% on Sales"),
+        ("Receivables (Debtors)", recv_val,      "MsPartyOpening D%"),
+        ("Payables (Creditors)",  pay_val,       "MsPartyOpening C%"),
+        ("Net Working Capital",   recv_val + clos_stk_val - pay_val, ""),
     ]
-    df_pl = pd.DataFrame(pl_rows, columns=["Item", "Amount", "Note"])
+    df_pl = pd.DataFrame(trd_rows, columns=["Item", "Amount", "Note"])
     df_pl["Amount"] = df_pl["Amount"].apply(fmt_inr)
     st.dataframe(df_pl, use_container_width=True, hide_index=True)
 
@@ -97,7 +113,7 @@ def render():
     st.subheader("Monthly Revenue vs Cost of Goods")
     df_trend = query(f"""
         SELECT
-            YEAR(h.VoucherDate) AS yr, MONTH(h.VoucherDate) AS mo,
+            YEAR(COALESCE(h.TPDate, h.VoucherDate)) AS yr, MONTH(COALESCE(h.TPDate, h.VoucherDate)) AS mo,
             SUM(CASE WHEN t.ShortName='MS'                       THEN i.TotalAmount ELSE 0 END) AS revenue,
             SUM(CASE WHEN h.TransTypeID IN ({PURCHASE_ALL_IN})  THEN i.TotalAmount ELSE 0 END) AS cogs
         FROM TrVocHead h
@@ -106,7 +122,7 @@ def render():
         WHERE (t.ShortName='MS' OR h.TransTypeID IN ({PURCHASE_ALL_IN}))
           {NOT_CANCELLED} AND ISNULL(i.FreeItemYN,'N') <> 'Y'
           {date_filter}
-        GROUP BY YEAR(h.VoucherDate), MONTH(h.VoucherDate)
+        GROUP BY YEAR(COALESCE(h.TPDate, h.VoucherDate)), MONTH(COALESCE(h.TPDate, h.VoucherDate))
         ORDER BY yr, mo
     """)
     if not df_trend.empty:
@@ -126,7 +142,7 @@ def render():
     st.subheader("Working Capital Components")
     wc_data = {
         "Component": ["Receivables", "Stock (Valuation)", "Payables"],
-        "Amount":    [recv_val, float(stock_val["val_amt"][0] or 0), pay_val],
+        "Amount":    [recv_val, clos_stk_val, pay_val],
         "Type":      ["Asset", "Asset", "Liability"],
     }
     df_wc = pd.DataFrame(wc_data)
