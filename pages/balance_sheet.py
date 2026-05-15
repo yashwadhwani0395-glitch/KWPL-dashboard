@@ -1,7 +1,7 @@
 import streamlit as st
 import pandas as pd
 from db import query
-from config import SALES_IN, PURCHASE_IN, PURCHASE_ALL_IN, NOT_CANCELLED, NOT_FREE, COLORS
+from config import PURCHASE_IN, PURCHASE_ALL_IN, NOT_CANCELLED, NOT_FREE, COLORS
 from utils import fmt_inr, fmt_qty, month_col, scale_cr
 from components.kpi_cards import kpi_row
 from components.charts import bar_chart, grouped_bar, pie_chart
@@ -43,34 +43,19 @@ def render():
         FROM MsPartyOpening
         WHERE LEFT(PartyID, 1) = 'D'
     """)
-    # Payables still from TrVocDetail net ledger (C% suppliers)
     pay_q = query(f"""
-        SELECT SUM(net_balance) AS payables
-        FROM (
-            SELECT SUM(CASE WHEN d.DrCrIndicator='C' THEN d.Amount ELSE -d.Amount END) AS net_balance
-            FROM TrVocDetail d
-            JOIN TrVocHead h ON h.TransTypeID=d.TransTypeID AND h.VoucherNo=d.VoucherNo
-            WHERE ISNULL(h.Cancelled,'N') <> 'Y' AND d.PartyID LIKE 'C%'
-              {cutoff_sql}
-            GROUP BY d.PartyID
-            HAVING SUM(CASE WHEN d.DrCrIndicator='C' THEN d.Amount ELSE -d.Amount END) > 0
-        ) p
+        SELECT SUM(ABS({bal_col})) AS payables
+        FROM MsPartyOpening
+        WHERE LEFT(PartyID, 1) = 'C'
+          AND {bal_col} < 0
     """)
-    stock_val = query(f"""
-        SELECT SUM(sub.net_bottles * m.MrpBottRate) AS mrp
-        FROM (
-            SELECT vi.ItemID,
-                   SUM(CASE WHEN h.TransTypeID IN ({PURCHASE_IN})
-                            THEN vi.TotalBottleQty
-                            ELSE -vi.TotalBottleQty END) AS net_bottles
-            FROM TrVocItem vi
-            JOIN TrVocHead h ON h.TransTypeID=vi.TransTypeID AND h.VoucherNo=vi.VoucherNo
-            WHERE h.TransTypeID IN ({PURCHASE_IN},{SALES_IN})
-              {NOT_CANCELLED} AND ISNULL(vi.FreeItemYN,'N') <> 'Y'
-            GROUP BY vi.ItemID
-        ) sub
-        JOIN MsItemMaster m ON m.ItemID = sub.ItemID
-        WHERE sub.net_bottles > 0
+    stock_val = query("""
+        SELECT
+            SUM(ob.ClosingQtyTmp * m.ValuationBottleRate) AS val_amt,
+            SUM(ob.ClosingQtyTmp)                          AS bottles
+        FROM MsItemBatchOpening ob
+        JOIN MsItemMaster m ON m.ItemID = ob.ItemID
+        WHERE ob.ClosingQtyTmp > 0
     """)
 
     rev_val  = float(pl["revenue"][0]           or 0)
@@ -87,7 +72,7 @@ def render():
          "delta": f"{gp_pct:.1f}% GP%"},
         {"label": "Receivables",       "value": recv_val,              "fmt": "inr"},
         {"label": "Payables",          "value": pay_val,               "fmt": "inr"},
-        {"label": "Stock (MRP Value)", "value": stock_val["mrp"][0],   "fmt": "inr"},
+        {"label": "Stock (Valuation)", "value": stock_val["val_amt"][0], "fmt": "inr"},
     ])
 
     st.divider()
@@ -140,8 +125,8 @@ def render():
     # ── Working capital ───────────────────────────────────────────────────────
     st.subheader("Working Capital Components")
     wc_data = {
-        "Component": ["Receivables", "Stock (MRP)", "Payables"],
-        "Amount":    [recv_val, float(stock_val["mrp"][0] or 0), pay_val],
+        "Component": ["Receivables", "Stock (Valuation)", "Payables"],
+        "Amount":    [recv_val, float(stock_val["val_amt"][0] or 0), pay_val],
         "Type":      ["Asset", "Asset", "Liability"],
     }
     df_wc = pd.DataFrame(wc_data)
@@ -171,13 +156,12 @@ def render():
         ORDER BY op.{bal_col} DESC
     """)
     df_pay = query(f"""
-        SELECT TOP 10 p.PartyName AS party, SUM(d.RemainingAmt) AS payable
-        FROM TrVocDetail d
-        JOIN TrVocHead h ON h.TransTypeID=d.TransTypeID AND h.VoucherNo=d.VoucherNo
-        JOIN MsPartyMaster p ON p.PartyID=d.PartyID
-        WHERE h.TransTypeID IN ({PURCHASE_IN}) {NOT_CANCELLED}
-          AND d.DrCrIndicator='C' AND d.RemainingAmt > 0
-        GROUP BY p.PartyName ORDER BY payable DESC
+        SELECT TOP 10 p.PartyName AS party, ABS(op.{bal_col}) AS payable
+        FROM MsPartyOpening op
+        JOIN MsPartyMaster p ON p.PartyID = op.PartyID
+        WHERE LEFT(op.PartyID, 1) = 'C'
+          AND op.{bal_col} < 0
+        ORDER BY ABS(op.{bal_col}) DESC
     """)
     col_l, col_r = st.columns(2)
     with col_l:

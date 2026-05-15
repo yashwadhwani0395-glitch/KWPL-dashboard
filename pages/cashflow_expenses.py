@@ -198,3 +198,44 @@ def render():
             ], yaxis_title="₹ Crores"),
             use_container_width=True, key="cf_efficiency"
         )
+
+    st.divider()
+
+    # ── Expense breakdown by GL account ──────────────────────────────────────
+    st.subheader("Expenses by Account (BP + CE vouchers → GL accounts)")
+    st.caption(
+        "GL expense accounts (MainHeadType=4) debited on Bank Payment and Cash Expense vouchers."
+    )
+    df_exp = query(f"""
+        SELECT TOP 30
+            a.AccHeadName AS account,
+            SUM(d.Amount) AS amount,
+            COUNT(DISTINCT CAST(d.TransTypeID AS VARCHAR)+'|'+d.VoucherNo) AS vouchers
+        FROM TrVocDetail d
+        JOIN TrVocHead h ON h.TransTypeID=d.TransTypeID AND h.VoucherNo=d.VoucherNo
+        JOIN MsTransType t ON t.id_key=h.TransTypeID
+        JOIN MsAccountHead a ON a.AccHeadID = d.PartyID
+        WHERE t.ShortName IN ('BP','CE')
+          AND ISNULL(h.Cancelled,'N') <> 'Y'
+          AND d.DrCrIndicator='D'
+          AND a.MainHeadType = 4
+          {date_filter}
+        GROUP BY a.AccHeadName
+        ORDER BY amount DESC
+    """)
+    if not df_exp.empty:
+        df_exp_cr = df_exp.copy()
+        df_exp_cr["amount_cr"] = df_exp_cr["amount"] / 10_000_000
+        st.plotly_chart(
+            bar_chart(df_exp_cr, x="account", y="amount_cr",
+                      orientation="h",
+                      color=COLORS["warning"],
+                      yaxis_title="₹ Crores"),
+            use_container_width=True, key="cf_exp_gl"
+        )
+        df_exp_disp = df_exp[["account", "amount", "vouchers"]].copy()
+        df_exp_disp["amount"] = df_exp_disp["amount"].apply(fmt_inr)
+        df_exp_disp.columns = ["GL Account", "Amount", "Vouchers"]
+        st.dataframe(df_exp_disp, use_container_width=True, hide_index=True)
+    else:
+        st.info("No expense GL account entries found for this period.")

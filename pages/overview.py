@@ -41,7 +41,6 @@ def render():
         JOIN MsTransType t ON t.id_key=h.TransTypeID
         WHERE t.ShortName='MS' {NOT_CANCELLED} AND ISNULL(i.FreeItemYN,'N')<>'Y' {date_filter}
     """)
-    # Active customers = distinct D% parties on DR side of product invoices (MS + LD + BF/JD)
     kpi_ar = query(f"""
         SELECT COUNT(DISTINCT d.PartyID) AS active_customers
         FROM (
@@ -49,7 +48,7 @@ def render():
             FROM TrVocHead h
             JOIN TrVocItem i ON i.TransTypeID=h.TransTypeID AND i.VoucherNo=h.VoucherNo
             JOIN MsTransType t ON t.id_key=h.TransTypeID
-            WHERE (t.ShortName IN ('MS','LD') OR h.TransTypeID=53)
+            WHERE t.ShortName IN ('MS','LD')
               {NOT_CANCELLED} {date_filter}
         ) v
         JOIN TrVocDetail d ON d.TransTypeID=v.TransTypeID AND d.VoucherNo=v.VoucherNo
@@ -62,31 +61,24 @@ def render():
         FROM MsPartyOpening
         WHERE LEFT(PartyID, 1) = 'D'
     """)
-    # Stock = all inflows (PU + excise BP/CE) minus all outflows (MS sales + LD deliveries + SA breakages)
-    stock_val = query(f"""
-        SELECT SUM(sub.net_bottles * m.MrpBottRate) AS stock_value
-        FROM (
-            SELECT vi.ItemID,
-                   SUM(CASE WHEN h.TransTypeID IN ({PURCHASE_ALL_IN}) THEN  vi.TotalBottleQty
-                            ELSE                                            -vi.TotalBottleQty
-                       END) AS net_bottles
-            FROM TrVocItem vi
-            JOIN TrVocHead h ON h.TransTypeID=vi.TransTypeID AND h.VoucherNo=vi.VoucherNo
-            WHERE h.TransTypeID IN ({PURCHASE_ALL_IN},{SALES_IN},39,19,42,9)
-              {NOT_CANCELLED} AND ISNULL(vi.FreeItemYN,'N') <> 'Y'
-            GROUP BY vi.ItemID
-        ) sub
-        JOIN MsItemMaster m ON m.ItemID = sub.ItemID
-        WHERE sub.net_bottles > 0
+    # Stock from MsItemBatchOpening — ERP pre-computed live stock (ClosingQtyTmp).
+    # Valued at ValuationBottleRate (balance-sheet rate, not MRP).
+    stock_val = query("""
+        SELECT
+            SUM(ob.ClosingQtyTmp)                                  AS stock_bottles,
+            SUM(ob.ClosingQtyTmp * m.ValuationBottleRate)          AS stock_value
+        FROM MsItemBatchOpening ob
+        JOIN MsItemMaster m ON m.ItemID = ob.ItemID
+        WHERE ob.ClosingQtyTmp > 0
     """)
 
     kpi_row([
-        {"label": "Total Sales",       "value": kpi_vol["total_sales"][0],      "fmt": "inr"},
-        {"label": "Total Purchases",   "value": kpi_vol["total_purchases"][0],  "fmt": "inr"},
-        {"label": "Total Invoices",    "value": kpi_cnt["total_invoices"][0],   "fmt": "qty"},
-        {"label": "Active Customers",  "value": kpi_ar["active_customers"][0],  "fmt": "qty"},
-        {"label": "Outstanding",       "value": kpi_os["total_outstanding"][0], "fmt": "inr"},
-        {"label": "Stock Value (MRP)", "value": stock_val["stock_value"][0],    "fmt": "inr"},
+        {"label": "Total Sales",         "value": kpi_vol["total_sales"][0],      "fmt": "inr"},
+        {"label": "Total Purchases",     "value": kpi_vol["total_purchases"][0],  "fmt": "inr"},
+        {"label": "Total Invoices",      "value": kpi_cnt["total_invoices"][0],   "fmt": "qty"},
+        {"label": "Active Customers",    "value": kpi_ar["active_customers"][0],  "fmt": "qty"},
+        {"label": "Outstanding",         "value": kpi_os["total_outstanding"][0], "fmt": "inr"},
+        {"label": "Stock (Valuation)",   "value": stock_val["stock_value"][0],    "fmt": "inr"},
     ])
 
     st.divider()
@@ -156,30 +148,18 @@ def render():
         "#8B4513","#FF6B6B","#4ECDC4","#6C757D","#C0392B",
     ]
     df_prin = query(f"""
-        SELECT company, SUM(sales) AS sales, SUM(bottles) AS bottles
-        FROM (
-            SELECT COALESCE(p.PartyName,'Others') AS company,
-                   i.TotalAmount AS sales, i.TotalBottleQty AS bottles
-            FROM TrVocHead h
-            JOIN TrVocItem i   ON i.TransTypeID=h.TransTypeID AND i.VoucherNo=h.VoucherNo
-            JOIN MsTransType t ON t.id_key=h.TransTypeID
-            JOIN MsItemMaster m ON m.ItemID=i.ItemID
-            LEFT JOIN MsBrandMaster b  ON b.BrandID=m.BrandID
-            LEFT JOIN MsPartyMaster p  ON p.PartyID=b.CompanyID
-            WHERE t.ShortName='MS' {NOT_CANCELLED} {NOT_FREE} {date_filter}
-            UNION ALL
-            SELECT COALESCE(p.PartyName,'Others') AS company,
-                   i.TotalAmount AS sales, i.TotalBottleQty AS bottles
-            FROM TrVocHead h
-            JOIN TrVocItem i  ON i.TransTypeID=h.TransTypeID AND i.VoucherNo=h.VoucherNo
-            JOIN MsItemMaster m ON m.ItemID=i.ItemID
-            LEFT JOIN MsBrandMaster b ON b.BrandID=m.BrandID
-            LEFT JOIN MsPartyMaster p ON p.PartyID=b.CompanyID
-            WHERE h.TransTypeID=53
-              AND ISNULL(h.Cancelled,'N') <> 'Y'
-              AND ISNULL(i.FreeItemYN,'N') <> 'Y' {date_filter}
-        ) t
-        GROUP BY company ORDER BY sales DESC
+        SELECT COALESCE(p.PartyName,'Others') AS company,
+               SUM(i.TotalAmount)    AS sales,
+               SUM(i.TotalBottleQty) AS bottles
+        FROM TrVocHead h
+        JOIN TrVocItem i   ON i.TransTypeID=h.TransTypeID AND i.VoucherNo=h.VoucherNo
+        JOIN MsTransType t ON t.id_key=h.TransTypeID
+        JOIN MsItemMaster m ON m.ItemID=i.ItemID
+        LEFT JOIN MsBrandMaster b ON b.BrandID=m.BrandID
+        LEFT JOIN MsPartyMaster p ON p.PartyID=b.CompanyID
+        WHERE t.ShortName='MS' {NOT_CANCELLED} {NOT_FREE} {date_filter}
+        GROUP BY COALESCE(p.PartyName,'Others')
+        ORDER BY sales DESC
     """)
 
     if not df_prin.empty:
@@ -212,30 +192,18 @@ def render():
     # ── Monthly Sales by Company (stacked) ────────────────────────────────────
     st.subheader("Monthly Sales by Company")
     df_pm = query(f"""
-        SELECT yr, mo, company, SUM(sales) AS sales
-        FROM (
-            SELECT YEAR(h.VoucherDate) AS yr, MONTH(h.VoucherDate) AS mo,
-                   COALESCE(p.PartyName,'Others') AS company, i.TotalAmount AS sales
-            FROM TrVocHead h
-            JOIN TrVocItem i   ON i.TransTypeID=h.TransTypeID AND i.VoucherNo=h.VoucherNo
-            JOIN MsTransType t ON t.id_key=h.TransTypeID
-            JOIN MsItemMaster m ON m.ItemID=i.ItemID
-            LEFT JOIN MsBrandMaster b ON b.BrandID=m.BrandID
-            LEFT JOIN MsPartyMaster p ON p.PartyID=b.CompanyID
-            WHERE t.ShortName='MS' {NOT_CANCELLED} {NOT_FREE} {date_filter}
-            UNION ALL
-            SELECT YEAR(h.VoucherDate) AS yr, MONTH(h.VoucherDate) AS mo,
-                   COALESCE(p.PartyName,'Others') AS company, i.TotalAmount AS sales
-            FROM TrVocHead h
-            JOIN TrVocItem i  ON i.TransTypeID=h.TransTypeID AND i.VoucherNo=h.VoucherNo
-            JOIN MsItemMaster m ON m.ItemID=i.ItemID
-            LEFT JOIN MsBrandMaster b ON b.BrandID=m.BrandID
-            LEFT JOIN MsPartyMaster p ON p.PartyID=b.CompanyID
-            WHERE h.TransTypeID=53
-              AND ISNULL(h.Cancelled,'N') <> 'Y'
-              AND ISNULL(i.FreeItemYN,'N') <> 'Y' {date_filter}
-        ) t
-        GROUP BY yr, mo, company ORDER BY yr, mo
+        SELECT YEAR(h.VoucherDate) AS yr, MONTH(h.VoucherDate) AS mo,
+               COALESCE(p.PartyName,'Others') AS company,
+               SUM(i.TotalAmount) AS sales
+        FROM TrVocHead h
+        JOIN TrVocItem i   ON i.TransTypeID=h.TransTypeID AND i.VoucherNo=h.VoucherNo
+        JOIN MsTransType t ON t.id_key=h.TransTypeID
+        JOIN MsItemMaster m ON m.ItemID=i.ItemID
+        LEFT JOIN MsBrandMaster b ON b.BrandID=m.BrandID
+        LEFT JOIN MsPartyMaster p ON p.PartyID=b.CompanyID
+        WHERE t.ShortName='MS' {NOT_CANCELLED} {NOT_FREE} {date_filter}
+        GROUP BY YEAR(h.VoucherDate), MONTH(h.VoucherDate), COALESCE(p.PartyName,'Others')
+        ORDER BY yr, mo
     """)
 
     if not df_pm.empty:

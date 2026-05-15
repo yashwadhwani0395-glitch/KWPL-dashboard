@@ -62,26 +62,17 @@ def render():
             "#8B4513","#FF6B6B","#4ECDC4","#6C757D","#C0392B",
         ]
         df_prin = query(f"""
-            SELECT company, SUM(sales) AS sales FROM (
-                SELECT COALESCE(p.PartyName,'Others') AS company, i.TotalAmount AS sales
-                FROM TrVocHead h
-                JOIN TrVocItem i ON i.TransTypeID=h.TransTypeID AND i.VoucherNo=h.VoucherNo
-                JOIN MsTransType t ON t.id_key=h.TransTypeID
-                JOIN MsItemMaster m ON m.ItemID=i.ItemID
-                LEFT JOIN MsBrandMaster b ON b.BrandID=m.BrandID
-                LEFT JOIN MsPartyMaster p ON p.PartyID=b.CompanyID
-                WHERE t.ShortName='MS' {NOT_CANCELLED} {NOT_FREE} {date_filter}
-                UNION ALL
-                SELECT COALESCE(p.PartyName,'Others') AS company, i.TotalAmount AS sales
-                FROM TrVocHead h
-                JOIN TrVocItem i ON i.TransTypeID=h.TransTypeID AND i.VoucherNo=h.VoucherNo
-                JOIN MsItemMaster m ON m.ItemID=i.ItemID
-                LEFT JOIN MsBrandMaster b ON b.BrandID=m.BrandID
-                LEFT JOIN MsPartyMaster p ON p.PartyID=b.CompanyID
-                WHERE h.TransTypeID=53
-                  AND ISNULL(h.Cancelled,'N') <> 'Y'
-                  AND ISNULL(i.FreeItemYN,'N') <> 'Y' {date_filter}
-            ) t GROUP BY company ORDER BY sales DESC
+            SELECT COALESCE(p.PartyName,'Others') AS company,
+                   SUM(i.TotalAmount) AS sales
+            FROM TrVocHead h
+            JOIN TrVocItem i ON i.TransTypeID=h.TransTypeID AND i.VoucherNo=h.VoucherNo
+            JOIN MsTransType t ON t.id_key=h.TransTypeID
+            JOIN MsItemMaster m ON m.ItemID=i.ItemID
+            LEFT JOIN MsBrandMaster b ON b.BrandID=m.BrandID
+            LEFT JOIN MsPartyMaster p ON p.PartyID=b.CompanyID
+            WHERE t.ShortName='MS' {NOT_CANCELLED} {NOT_FREE} {date_filter}
+            GROUP BY COALESCE(p.PartyName,'Others')
+            ORDER BY sales DESC
         """)
         if not df_prin.empty:
             comp_colors = [_COMP_COLORS[i % len(_COMP_COLORS)] for i in range(len(df_prin))]

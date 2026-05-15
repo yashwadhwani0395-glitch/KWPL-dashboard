@@ -1,6 +1,6 @@
 import streamlit as st
 from db import query
-from config import PURCHASE_IN, PURCHASE_ALL_IN, SALES_IN, NOT_CANCELLED, NOT_FREE, COLORS
+from config import PURCHASE_IN, PURCHASE_ALL_IN, NOT_CANCELLED, NOT_FREE, COLORS
 from utils import fmt_inr, fmt_qty, month_col, scale_cr
 from components.kpi_cards import kpi_row
 from components.charts import bar_chart, pie_chart, grouped_bar
@@ -29,32 +29,21 @@ def render():
         WHERE h.TransTypeID IN ({PURCHASE_ALL_IN}) {NOT_CANCELLED} {NOT_FREE}
           {date_filter}
     """)
-    # Stock is always current (no date filter)
-    stock = query(f"""
-        SELECT COUNT(DISTINCT sub.ItemID)           AS sku_count,
-               SUM(sub.net_bottles)                 AS total_bottles,
-               SUM(sub.net_bottles * m.MrpBottRate) AS stock_mrp
-        FROM (
-            SELECT vi.ItemID,
-                   SUM(CASE WHEN h.TransTypeID IN ({PURCHASE_IN})
-                            THEN vi.TotalBottleQty
-                            ELSE -vi.TotalBottleQty END) AS net_bottles
-            FROM TrVocItem vi
-            JOIN TrVocHead h ON h.TransTypeID=vi.TransTypeID AND h.VoucherNo=vi.VoucherNo
-            WHERE h.TransTypeID IN ({PURCHASE_IN},{SALES_IN})
-              {NOT_CANCELLED} AND ISNULL(vi.FreeItemYN,'N') <> 'Y'
-            GROUP BY vi.ItemID
-        ) sub
-        JOIN MsItemMaster m ON m.ItemID = sub.ItemID
-        WHERE sub.net_bottles > 0
+    stock = query("""
+        SELECT COUNT(DISTINCT ob.ItemID)                      AS sku_count,
+               SUM(ob.ClosingQtyTmp)                          AS total_bottles,
+               SUM(ob.ClosingQtyTmp * m.ValuationBottleRate)  AS stock_val
+        FROM MsItemBatchOpening ob
+        JOIN MsItemMaster m ON m.ItemID = ob.ItemID
+        WHERE ob.ClosingQtyTmp > 0
     """)
     kpi_row([
-        {"label": "Purchase Invoices",          "value": pur["invoices"][0],                   "fmt": "qty"},
-        {"label": "Company Invoices (PU)",       "value": pur["purchases"][0],                  "fmt": "inr"},
-        {"label": "Total Purchases (+ Excise)",  "value": pur_total["total_purchases"][0],      "fmt": "inr"},
-        {"label": "Bottles Purchased",           "value": pur["bottles"][0],                    "fmt": "qty"},
-        {"label": "Stock (MRP Value)",           "value": stock["stock_mrp"][0],                "fmt": "inr"},
-        {"label": "Stock (Bottles)",             "value": stock["total_bottles"][0],            "fmt": "qty"},
+        {"label": "Purchase Invoices",          "value": pur["invoices"][0],              "fmt": "qty"},
+        {"label": "Company Invoices (PU)",       "value": pur["purchases"][0],             "fmt": "inr"},
+        {"label": "Total Purchases (+ Excise)",  "value": pur_total["total_purchases"][0], "fmt": "inr"},
+        {"label": "Bottles Purchased",           "value": pur["bottles"][0],               "fmt": "qty"},
+        {"label": "Stock (Valuation)",           "value": stock["stock_val"][0],           "fmt": "inr"},
+        {"label": "Stock (Bottles)",             "value": stock["total_bottles"][0],       "fmt": "qty"},
     ])
 
     st.divider()
@@ -140,22 +129,14 @@ def render():
           {date_filter}
         GROUP BY b.BrandName ORDER BY purchased DESC
     """)
-    # Stock is always current (no date filter)
-    df_br_stk = query(f"""
+    df_br_stk = query("""
         SELECT b.BrandName AS brand,
-               SUM(CASE WHEN h.TransTypeID IN ({PURCHASE_IN})
-                        THEN vi.TotalBottleQty
-                        ELSE -vi.TotalBottleQty END) AS stock_bottles
-        FROM TrVocItem vi
-        JOIN TrVocHead h ON h.TransTypeID=vi.TransTypeID AND h.VoucherNo=vi.VoucherNo
-        JOIN MsItemMaster m ON m.ItemID=vi.ItemID
-        JOIN MsBrandMaster b ON b.BrandID=m.BrandID
-        WHERE h.TransTypeID IN ({PURCHASE_IN},{SALES_IN})
-          {NOT_CANCELLED} AND ISNULL(vi.FreeItemYN,'N') <> 'Y'
+               SUM(ob.ClosingQtyTmp) AS stock_bottles
+        FROM MsItemBatchOpening ob
+        JOIN MsItemMaster m ON m.ItemID = ob.ItemID
+        JOIN MsBrandMaster b ON b.BrandID = m.BrandID
+        WHERE ob.ClosingQtyTmp > 0
         GROUP BY b.BrandName
-        HAVING SUM(CASE WHEN h.TransTypeID IN ({PURCHASE_IN})
-                        THEN vi.TotalBottleQty
-                        ELSE -vi.TotalBottleQty END) > 0
         ORDER BY stock_bottles DESC
     """)
 
@@ -177,30 +158,21 @@ def render():
 
     # ── Stock detail table ────────────────────────────────────────────────────
     st.subheader("Stock Summary by Brand")
-    df_stk_detail = query(f"""
+    df_stk_detail = query("""
         SELECT b.BrandName AS brand,
-               COUNT(DISTINCT vi.ItemID) AS skus,
-               SUM(CASE WHEN h.TransTypeID IN ({PURCHASE_IN})
-                        THEN vi.TotalBottleQty
-                        ELSE -vi.TotalBottleQty END) AS bottles,
-               SUM(CASE WHEN h.TransTypeID IN ({PURCHASE_IN})
-                        THEN vi.TotalBottleQty * m2.MrpBottRate
-                        ELSE -vi.TotalBottleQty * m2.MrpBottRate END) AS mrp_value
-        FROM TrVocItem vi
-        JOIN TrVocHead h ON h.TransTypeID=vi.TransTypeID AND h.VoucherNo=vi.VoucherNo
-        JOIN MsItemMaster m2 ON m2.ItemID=vi.ItemID
-        JOIN MsBrandMaster b ON b.BrandID=m2.BrandID
-        WHERE h.TransTypeID IN ({PURCHASE_IN},{SALES_IN})
-          {NOT_CANCELLED} AND ISNULL(vi.FreeItemYN,'N') <> 'Y'
+               COUNT(DISTINCT ob.ItemID) AS skus,
+               SUM(ob.ClosingQtyTmp) AS bottles,
+               SUM(ob.ClosingQtyTmp * m.ValuationBottleRate) AS val_value
+        FROM MsItemBatchOpening ob
+        JOIN MsItemMaster m ON m.ItemID = ob.ItemID
+        JOIN MsBrandMaster b ON b.BrandID = m.BrandID
+        WHERE ob.ClosingQtyTmp > 0
         GROUP BY b.BrandName
-        HAVING SUM(CASE WHEN h.TransTypeID IN ({PURCHASE_IN})
-                        THEN vi.TotalBottleQty
-                        ELSE -vi.TotalBottleQty END) > 0
-        ORDER BY mrp_value DESC
+        ORDER BY val_value DESC
     """)
     if not df_stk_detail.empty:
         df_disp = df_stk_detail.copy()
-        df_disp["mrp_value"] = df_disp["mrp_value"].apply(fmt_inr)
+        df_disp["val_value"] = df_disp["val_value"].apply(fmt_inr)
         df_disp["bottles"]   = df_disp["bottles"].apply(fmt_qty)
-        df_disp.columns = ["Brand", "SKUs", "Bottles", "MRP Value"]
+        df_disp.columns = ["Brand", "SKUs", "Bottles", "Valuation Value"]
         st.dataframe(df_disp, use_container_width=True, hide_index=True)
