@@ -16,20 +16,11 @@ def render():
     date_filter = st.session_state.get("date_filter", "")
 
     # ── KPIs ──────────────────────────────────────────────────────────────────
-    # Sales value read from GL 000004 (SALES account) to match ERP Trading A/C exactly.
-    # Bottles/cases/invoices come from product-only TrVocItem lines (BrandID IS NOT NULL).
-    kpi_gl = query(f"""
-        SELECT SUM(d.Amount) AS sales
-        FROM TrVocDetail d
-        JOIN TrVocHead h ON h.TransTypeID=d.TransTypeID AND h.VoucherNo=d.VoucherNo
-        WHERE d.AccHeadID = '000004'
-          AND d.DrCrIndicator = 'C'
-          AND ISNULL(h.Cancelled,'N') <> 'Y'
-          {date_filter}
-    """)
-    kpi_vol = query(f"""
+    # All KPIs from TrVocItem (product lines only: BrandID IS NOT NULL excludes S00xxx service items).
+    kpi = query(f"""
         SELECT
             COUNT(DISTINCT CAST(h.TransTypeID AS VARCHAR)+'|'+h.VoucherNo) AS invoices,
+            SUM(i.TotalAmount)    AS sales,
             SUM(i.TotalBottleQty) AS bottles,
             SUM(i.CaseQty)        AS cases
         FROM TrVocHead h
@@ -39,10 +30,10 @@ def render():
           {date_filter}
     """)
     kpi_row([
-        {"label": "Invoices",     "value": kpi_vol["invoices"][0], "fmt": "qty"},
-        {"label": "Total Sales",  "value": kpi_gl["sales"][0],     "fmt": "inr"},
-        {"label": "Bottles Sold", "value": kpi_vol["bottles"][0],  "fmt": "qty"},
-        {"label": "Cases Sold",   "value": kpi_vol["cases"][0],    "fmt": "qty"},
+        {"label": "Invoices",     "value": kpi["invoices"][0], "fmt": "qty"},
+        {"label": "Total Sales",  "value": kpi["sales"][0],    "fmt": "inr"},
+        {"label": "Bottles Sold", "value": kpi["bottles"][0],  "fmt": "qty"},
+        {"label": "Cases Sold",   "value": kpi["cases"][0],    "fmt": "qty"},
     ])
 
     st.divider()
@@ -52,16 +43,14 @@ def render():
 
     with col_l:
         st.subheader("Monthly Sales Trend")
-        # Use GL 000004 postings for monthly sales — consistent with KPI above.
         df_m = query(f"""
             SELECT YEAR(COALESCE(h.TPDate, h.VoucherDate)) AS yr,
                    MONTH(COALESCE(h.TPDate, h.VoucherDate)) AS mo,
-                   SUM(d.Amount) AS sales
-            FROM TrVocDetail d
-            JOIN TrVocHead h ON h.TransTypeID=d.TransTypeID AND h.VoucherNo=d.VoucherNo
-            WHERE d.AccHeadID = '000004'
-              AND d.DrCrIndicator = 'C'
-              AND ISNULL(h.Cancelled,'N') <> 'Y'
+                   SUM(i.TotalAmount) AS sales
+            FROM TrVocHead h
+            JOIN TrVocItem i   ON i.TransTypeID=h.TransTypeID AND i.VoucherNo=h.VoucherNo
+            JOIN MsTransType t ON t.id_key=h.TransTypeID
+            WHERE t.ShortName='MS' {NOT_CANCELLED} {NOT_FREE} {_PRODUCT_ONLY}
               {date_filter}
             GROUP BY YEAR(COALESCE(h.TPDate, h.VoucherDate)),
                      MONTH(COALESCE(h.TPDate, h.VoucherDate))
@@ -102,14 +91,13 @@ def render():
 
     # ── Daily last 30 days ────────────────────────────────────────────────────
     st.subheader("Daily Sales — Last 30 Days")
-    df_d = query("""
+    df_d = query(f"""
         SELECT CAST(COALESCE(h.TPDate, h.VoucherDate) AS DATE) AS sale_date,
-               SUM(d.Amount) AS sales
-        FROM TrVocDetail d
-        JOIN TrVocHead h ON h.TransTypeID=d.TransTypeID AND h.VoucherNo=d.VoucherNo
-        WHERE d.AccHeadID = '000004'
-          AND d.DrCrIndicator = 'C'
-          AND ISNULL(h.Cancelled,'N') <> 'Y'
+               SUM(i.TotalAmount) AS sales
+        FROM TrVocHead h
+        JOIN TrVocItem i   ON i.TransTypeID=h.TransTypeID AND i.VoucherNo=h.VoucherNo
+        JOIN MsTransType t ON t.id_key=h.TransTypeID
+        WHERE t.ShortName='MS' {NOT_CANCELLED} {NOT_FREE} {_PRODUCT_ONLY}
           AND COALESCE(h.TPDate, h.VoucherDate) >= DATEADD(DAY,-30,GETDATE())
         GROUP BY CAST(COALESCE(h.TPDate, h.VoucherDate) AS DATE)
         ORDER BY sale_date

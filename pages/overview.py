@@ -1,7 +1,7 @@
 import streamlit as st
 import plotly.graph_objects as go
 from db import query
-from config import NOT_CANCELLED, NOT_FREE, COLORS
+from config import NOT_CANCELLED, NOT_FREE, COLORS, PURCHASE_IN
 from utils import fmt_inr, fmt_qty, month_col
 from components.kpi_cards import kpi_row
 from components.charts import grouped_bar, bar_chart, pie_chart
@@ -15,18 +15,20 @@ def render():
     st.divider()
 
     # ── KPIs ──────────────────────────────────────────────────────────────────
-    # Sales and Purchases from GL posting table — matches ERP Trading Account exactly.
-    # AccHeadID (not PartyID) holds the GL account on each TrVocDetail leg.
-    # Sales  = CR postings to AccHeadID 000004 (SALES account).
-    # Purchases = DR postings to AccHeadID 000005 (PURCHASES-TRADING account).
+    # Sales from TrVocItem (ShortName='MS', product lines only via BrandID IS NOT NULL).
+    # Purchases from TrVocItem (PURCHASE_IN transaction types, product lines only).
     kpi_vol = query(f"""
         SELECT
-            SUM(CASE WHEN d.AccHeadID='000004' AND d.DrCrIndicator='C' THEN d.Amount ELSE 0 END) AS total_sales,
-            SUM(CASE WHEN d.AccHeadID='000005' AND d.DrCrIndicator='D' THEN d.Amount ELSE 0 END) AS total_purchases
-        FROM TrVocDetail d
-        JOIN TrVocHead h ON h.TransTypeID=d.TransTypeID AND h.VoucherNo=d.VoucherNo
-        WHERE d.AccHeadID IN ('000004','000005')
+            SUM(CASE WHEN t.ShortName='MS' AND i.BrandID IS NOT NULL
+                     THEN i.TotalAmount ELSE 0 END) AS total_sales,
+            SUM(CASE WHEN h.TransTypeID IN ({PURCHASE_IN}) AND i.BrandID IS NOT NULL
+                     THEN i.TotalAmount ELSE 0 END) AS total_purchases
+        FROM TrVocHead h
+        JOIN TrVocItem i   ON i.TransTypeID=h.TransTypeID AND i.VoucherNo=h.VoucherNo
+        JOIN MsTransType t ON t.id_key=h.TransTypeID
+        WHERE (t.ShortName='MS' OR h.TransTypeID IN ({PURCHASE_IN}))
           AND ISNULL(h.Cancelled,'N') <> 'Y'
+          AND ISNULL(i.FreeItemYN,'N') <> 'Y'
           {date_filter}
     """)
     # Invoice count: only vouchers with actual product lines (excludes accounting-only entries)
@@ -82,14 +84,18 @@ def render():
     st.subheader("Monthly Trend — Sales, Collections & Purchases")
     df_trend = query(f"""
         SELECT
-            YEAR(COALESCE(h.TPDate, h.VoucherDate)) AS yr,
+            YEAR(COALESCE(h.TPDate, h.VoucherDate))  AS yr,
             MONTH(COALESCE(h.TPDate, h.VoucherDate)) AS mo,
-            SUM(CASE WHEN d.AccHeadID='000004' AND d.DrCrIndicator='C' THEN d.Amount ELSE 0 END) AS sales,
-            SUM(CASE WHEN d.AccHeadID='000005' AND d.DrCrIndicator='D' THEN d.Amount ELSE 0 END) AS purchases
-        FROM TrVocDetail d
-        JOIN TrVocHead h ON h.TransTypeID=d.TransTypeID AND h.VoucherNo=d.VoucherNo
-        WHERE d.AccHeadID IN ('000004','000005')
+            SUM(CASE WHEN t.ShortName='MS' AND i.BrandID IS NOT NULL
+                     THEN i.TotalAmount ELSE 0 END) AS sales,
+            SUM(CASE WHEN h.TransTypeID IN ({PURCHASE_IN}) AND i.BrandID IS NOT NULL
+                     THEN i.TotalAmount ELSE 0 END) AS purchases
+        FROM TrVocHead h
+        JOIN TrVocItem i   ON i.TransTypeID=h.TransTypeID AND i.VoucherNo=h.VoucherNo
+        JOIN MsTransType t ON t.id_key=h.TransTypeID
+        WHERE (t.ShortName='MS' OR h.TransTypeID IN ({PURCHASE_IN}))
           AND ISNULL(h.Cancelled,'N') <> 'Y'
+          AND ISNULL(i.FreeItemYN,'N') <> 'Y'
           {date_filter}
         GROUP BY YEAR(COALESCE(h.TPDate, h.VoucherDate)), MONTH(COALESCE(h.TPDate, h.VoucherDate))
         ORDER BY yr, mo

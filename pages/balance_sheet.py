@@ -1,7 +1,7 @@
 import streamlit as st
 import pandas as pd
 from db import query
-from config import NOT_CANCELLED, COLORS
+from config import NOT_CANCELLED, NOT_FREE, COLORS, PURCHASE_IN
 from utils import fmt_inr, fmt_qty, month_col, scale_cr
 from components.kpi_cards import kpi_row
 from components.charts import bar_chart, grouped_bar, pie_chart
@@ -23,30 +23,36 @@ def render():
     # ── Top-line summary ──────────────────────────────────────────────────────
     # All figures from GL posting table (TrVocDetail), mirroring how ERP computes
     # the Trading Account. Each line maps to the exact account in MsAccountHead.
-    # AccHeadID (not PartyID) stores the GL account on each TrVocDetail leg.
+    # Revenue and purchases from TrVocItem product lines (BrandID IS NOT NULL excludes
+    # service lines like TCS, excise charges, discounts stored as S00xxx items).
     rev_q = query(f"""
-        SELECT SUM(d.Amount) AS revenue
-        FROM TrVocDetail d
-        JOIN TrVocHead h ON h.TransTypeID=d.TransTypeID AND h.VoucherNo=d.VoucherNo
-        WHERE d.AccHeadID = '000004'
-          AND d.DrCrIndicator = 'C'
+        SELECT SUM(i.TotalAmount) AS revenue
+        FROM TrVocHead h
+        JOIN TrVocItem i   ON i.TransTypeID=h.TransTypeID AND i.VoucherNo=h.VoucherNo
+        JOIN MsTransType t ON t.id_key=h.TransTypeID
+        WHERE t.ShortName='MS'
           AND ISNULL(h.Cancelled,'N') <> 'Y'
+          AND ISNULL(i.FreeItemYN,'N') <> 'Y'
+          AND i.BrandID IS NOT NULL
           {date_filter}
     """)
     pur_q = query(f"""
-        SELECT SUM(d.Amount) AS purchases
-        FROM TrVocDetail d
-        JOIN TrVocHead h ON h.TransTypeID=d.TransTypeID AND h.VoucherNo=d.VoucherNo
-        WHERE d.AccHeadID = '000005'
-          AND d.DrCrIndicator = 'D'
+        SELECT SUM(i.TotalAmount) AS purchases
+        FROM TrVocHead h
+        JOIN TrVocItem i ON i.TransTypeID=h.TransTypeID AND i.VoucherNo=h.VoucherNo
+        WHERE h.TransTypeID IN ({PURCHASE_IN})
           AND ISNULL(h.Cancelled,'N') <> 'Y'
+          AND ISNULL(i.FreeItemYN,'N') <> 'Y'
+          AND i.BrandID IS NOT NULL
           {date_filter}
     """)
+    # Excise and Sales Scheme use TrVocDetail.PartyID which stores the GL account ID
+    # for payment/adjustment entries (no specific party, so PartyID holds the account).
     exc_q = query(f"""
         SELECT SUM(d.Amount) AS excise
         FROM TrVocDetail d
         JOIN TrVocHead h ON h.TransTypeID=d.TransTypeID AND h.VoucherNo=d.VoucherNo
-        JOIN MsAccountHead a ON a.AccHeadID = d.AccHeadID
+        JOIN MsAccountHead a ON a.AccHeadID = d.PartyID
         WHERE a.AccHeadName LIKE '%EXCISE DUTY%'
           AND d.DrCrIndicator = 'D'
           AND ISNULL(h.Cancelled,'N') <> 'Y'
@@ -56,7 +62,7 @@ def render():
         SELECT SUM(d.Amount) AS sales_scheme
         FROM TrVocDetail d
         JOIN TrVocHead h ON h.TransTypeID=d.TransTypeID AND h.VoucherNo=d.VoucherNo
-        JOIN MsAccountHead a ON a.AccHeadID = d.AccHeadID
+        JOIN MsAccountHead a ON a.AccHeadID = d.PartyID
         WHERE a.AccHeadName LIKE '%SALES SCHEME%'
           AND d.DrCrIndicator = 'C'
           AND ISNULL(h.Cancelled,'N') <> 'Y'
@@ -138,14 +144,18 @@ def render():
     st.subheader("Monthly Revenue vs Cost of Goods")
     df_trend = query(f"""
         SELECT
-            YEAR(COALESCE(h.TPDate, h.VoucherDate)) AS yr,
+            YEAR(COALESCE(h.TPDate, h.VoucherDate))  AS yr,
             MONTH(COALESCE(h.TPDate, h.VoucherDate)) AS mo,
-            SUM(CASE WHEN d.AccHeadID='000004' AND d.DrCrIndicator='C' THEN d.Amount ELSE 0 END) AS revenue,
-            SUM(CASE WHEN d.AccHeadID='000005' AND d.DrCrIndicator='D' THEN d.Amount ELSE 0 END) AS cogs
-        FROM TrVocDetail d
-        JOIN TrVocHead h ON h.TransTypeID=d.TransTypeID AND h.VoucherNo=d.VoucherNo
-        WHERE d.AccHeadID IN ('000004','000005')
+            SUM(CASE WHEN t.ShortName='MS' AND i.BrandID IS NOT NULL
+                     THEN i.TotalAmount ELSE 0 END) AS revenue,
+            SUM(CASE WHEN h.TransTypeID IN ({PURCHASE_IN}) AND i.BrandID IS NOT NULL
+                     THEN i.TotalAmount ELSE 0 END) AS cogs
+        FROM TrVocHead h
+        JOIN TrVocItem i   ON i.TransTypeID=h.TransTypeID AND i.VoucherNo=h.VoucherNo
+        JOIN MsTransType t ON t.id_key=h.TransTypeID
+        WHERE (t.ShortName='MS' OR h.TransTypeID IN ({PURCHASE_IN}))
           AND ISNULL(h.Cancelled,'N') <> 'Y'
+          AND ISNULL(i.FreeItemYN,'N') <> 'Y'
           {date_filter}
         GROUP BY YEAR(COALESCE(h.TPDate, h.VoucherDate)), MONTH(COALESCE(h.TPDate, h.VoucherDate))
         ORDER BY yr, mo
