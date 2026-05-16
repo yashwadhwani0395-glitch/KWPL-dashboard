@@ -119,13 +119,14 @@ def render():
 
     # ── Brand purchase vs stock ───────────────────────────────────────────────
     st.subheader("Brand — Purchased vs In Stock")
+    # Use i.BrandID directly (confirmed column on TrVocItem); IS NOT NULL excludes service lines.
     df_br_pur = query(f"""
         SELECT b.BrandName AS brand, SUM(i.TotalBottleQty) AS purchased
         FROM TrVocItem i
         JOIN TrVocHead h ON h.TransTypeID=i.TransTypeID AND h.VoucherNo=i.VoucherNo
-        JOIN MsItemMaster m ON m.ItemID=i.ItemID
-        JOIN MsBrandMaster b ON b.BrandID=m.BrandID
+        JOIN MsBrandMaster b ON b.BrandID=i.BrandID
         WHERE h.TransTypeID IN ({PURCHASE_IN}) {NOT_CANCELLED} {NOT_FREE}
+          AND i.BrandID IS NOT NULL
           {date_filter}
         GROUP BY b.BrandName ORDER BY purchased DESC
     """)
@@ -171,8 +172,16 @@ def render():
         ORDER BY val_value DESC
     """)
     if not df_stk_detail.empty:
+        df_stk_csv = df_stk_detail.copy()
         df_disp = df_stk_detail.copy()
         df_disp["val_value"] = df_disp["val_value"].apply(fmt_inr)
         df_disp["bottles"]   = df_disp["bottles"].apply(fmt_qty)
         df_disp.columns = ["Brand", "SKUs", "Bottles", "Valuation Value"]
         st.dataframe(df_disp, use_container_width=True, hide_index=True)
+        st.download_button(
+            "⬇️ Download Stock CSV",
+            data=df_stk_csv.to_csv(index=False),
+            file_name="stock_by_brand.csv",
+            mime="text/csv",
+            key="ps_dl_stock",
+        )

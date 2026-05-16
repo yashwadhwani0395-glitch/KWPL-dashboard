@@ -47,7 +47,7 @@ def render():
         JOIN TrVocHead h   ON h.TransTypeID=d.TransTypeID AND h.VoucherNo=d.VoucherNo
         JOIN MsTransType t ON t.id_key=h.TransTypeID
         JOIN MsPartyMaster p ON p.PartyID=d.PartyID
-        WHERE t.ShortName IN ('PU','PE')
+        WHERE t.ShortName = 'PU'
           {NOT_CANCELLED}
           AND d.DrCrIndicator='C' AND d.RemainingAmt > 0
           AND LEFT(d.PartyID,1)='C'

@@ -233,9 +233,17 @@ def render():
                       yaxis_title="₹ Crores"),
             use_container_width=True, key="cf_exp_gl"
         )
-        df_exp_disp = df_exp[["account", "amount", "vouchers"]].copy()
+        df_exp_csv  = df_exp[["account", "amount", "vouchers"]].copy()
+        df_exp_disp = df_exp_csv.copy()
         df_exp_disp["amount"] = df_exp_disp["amount"].apply(fmt_inr)
         df_exp_disp.columns = ["GL Account", "Amount", "Vouchers"]
         st.dataframe(df_exp_disp, use_container_width=True, hide_index=True)
+        st.download_button(
+            "⬇️ Download Expenses CSV",
+            data=df_exp_csv.to_csv(index=False),
+            file_name="expenses_by_gl.csv",
+            mime="text/csv",
+            key="cf_dl_exp",
+        )
     else:
         st.info("No expense GL account entries found for this period.")
