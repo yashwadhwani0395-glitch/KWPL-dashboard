@@ -16,15 +16,16 @@ def render():
 
     # ── KPIs ──────────────────────────────────────────────────────────────────
     # Sales and Purchases from GL posting table — matches ERP Trading Account exactly.
-    # Sales  = CR postings to GL 000004 (SALES account).
-    # Purchases = DR postings to GL 000005 (PURCHASES-TRADING account).
+    # AccHeadID (not PartyID) holds the GL account on each TrVocDetail leg.
+    # Sales  = CR postings to AccHeadID 000004 (SALES account).
+    # Purchases = DR postings to AccHeadID 000005 (PURCHASES-TRADING account).
     kpi_vol = query(f"""
         SELECT
-            SUM(CASE WHEN d.PartyID='000004' AND d.DrCrIndicator='C' THEN d.Amount ELSE 0 END) AS total_sales,
-            SUM(CASE WHEN d.PartyID='000005' AND d.DrCrIndicator='D' THEN d.Amount ELSE 0 END) AS total_purchases
+            SUM(CASE WHEN d.AccHeadID='000004' AND d.DrCrIndicator='C' THEN d.Amount ELSE 0 END) AS total_sales,
+            SUM(CASE WHEN d.AccHeadID='000005' AND d.DrCrIndicator='D' THEN d.Amount ELSE 0 END) AS total_purchases
         FROM TrVocDetail d
         JOIN TrVocHead h ON h.TransTypeID=d.TransTypeID AND h.VoucherNo=d.VoucherNo
-        WHERE d.PartyID IN ('000004','000005')
+        WHERE d.AccHeadID IN ('000004','000005')
           AND ISNULL(h.Cancelled,'N') <> 'Y'
           {date_filter}
     """)
@@ -83,11 +84,11 @@ def render():
         SELECT
             YEAR(COALESCE(h.TPDate, h.VoucherDate)) AS yr,
             MONTH(COALESCE(h.TPDate, h.VoucherDate)) AS mo,
-            SUM(CASE WHEN d.PartyID='000004' AND d.DrCrIndicator='C' THEN d.Amount ELSE 0 END) AS sales,
-            SUM(CASE WHEN d.PartyID='000005' AND d.DrCrIndicator='D' THEN d.Amount ELSE 0 END) AS purchases
+            SUM(CASE WHEN d.AccHeadID='000004' AND d.DrCrIndicator='C' THEN d.Amount ELSE 0 END) AS sales,
+            SUM(CASE WHEN d.AccHeadID='000005' AND d.DrCrIndicator='D' THEN d.Amount ELSE 0 END) AS purchases
         FROM TrVocDetail d
         JOIN TrVocHead h ON h.TransTypeID=d.TransTypeID AND h.VoucherNo=d.VoucherNo
-        WHERE d.PartyID IN ('000004','000005')
+        WHERE d.AccHeadID IN ('000004','000005')
           AND ISNULL(h.Cancelled,'N') <> 'Y'
           {date_filter}
         GROUP BY YEAR(COALESCE(h.TPDate, h.VoucherDate)), MONTH(COALESCE(h.TPDate, h.VoucherDate))

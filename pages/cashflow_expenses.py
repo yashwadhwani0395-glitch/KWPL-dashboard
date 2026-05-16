@@ -214,7 +214,7 @@ def render():
         FROM TrVocDetail d
         JOIN TrVocHead h ON h.TransTypeID=d.TransTypeID AND h.VoucherNo=d.VoucherNo
         JOIN MsTransType t ON t.id_key=h.TransTypeID
-        JOIN MsAccountHead a ON a.AccHeadID = d.PartyID
+        JOIN MsAccountHead a ON a.AccHeadID = d.AccHeadID
         WHERE t.ShortName IN ('BP','CE')
           AND ISNULL(h.Cancelled,'N') <> 'Y'
           AND d.DrCrIndicator='D'

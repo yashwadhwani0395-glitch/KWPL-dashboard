@@ -22,7 +22,7 @@ def render():
         SELECT SUM(d.Amount) AS sales
         FROM TrVocDetail d
         JOIN TrVocHead h ON h.TransTypeID=d.TransTypeID AND h.VoucherNo=d.VoucherNo
-        WHERE d.PartyID = '000004'
+        WHERE d.AccHeadID = '000004'
           AND d.DrCrIndicator = 'C'
           AND ISNULL(h.Cancelled,'N') <> 'Y'
           {date_filter}
@@ -59,7 +59,7 @@ def render():
                    SUM(d.Amount) AS sales
             FROM TrVocDetail d
             JOIN TrVocHead h ON h.TransTypeID=d.TransTypeID AND h.VoucherNo=d.VoucherNo
-            WHERE d.PartyID = '000004'
+            WHERE d.AccHeadID = '000004'
               AND d.DrCrIndicator = 'C'
               AND ISNULL(h.Cancelled,'N') <> 'Y'
               {date_filter}
@@ -107,7 +107,7 @@ def render():
                SUM(d.Amount) AS sales
         FROM TrVocDetail d
         JOIN TrVocHead h ON h.TransTypeID=d.TransTypeID AND h.VoucherNo=d.VoucherNo
-        WHERE d.PartyID = '000004'
+        WHERE d.AccHeadID = '000004'
           AND d.DrCrIndicator = 'C'
           AND ISNULL(h.Cancelled,'N') <> 'Y'
           AND COALESCE(h.TPDate, h.VoucherDate) >= DATEADD(DAY,-30,GETDATE())

@@ -23,11 +23,12 @@ def render():
     # ── Top-line summary ──────────────────────────────────────────────────────
     # All figures from GL posting table (TrVocDetail), mirroring how ERP computes
     # the Trading Account. Each line maps to the exact account in MsAccountHead.
+    # AccHeadID (not PartyID) stores the GL account on each TrVocDetail leg.
     rev_q = query(f"""
         SELECT SUM(d.Amount) AS revenue
         FROM TrVocDetail d
         JOIN TrVocHead h ON h.TransTypeID=d.TransTypeID AND h.VoucherNo=d.VoucherNo
-        WHERE d.PartyID = '000004'
+        WHERE d.AccHeadID = '000004'
           AND d.DrCrIndicator = 'C'
           AND ISNULL(h.Cancelled,'N') <> 'Y'
           {date_filter}
@@ -36,7 +37,7 @@ def render():
         SELECT SUM(d.Amount) AS purchases
         FROM TrVocDetail d
         JOIN TrVocHead h ON h.TransTypeID=d.TransTypeID AND h.VoucherNo=d.VoucherNo
-        WHERE d.PartyID = '000005'
+        WHERE d.AccHeadID = '000005'
           AND d.DrCrIndicator = 'D'
           AND ISNULL(h.Cancelled,'N') <> 'Y'
           {date_filter}
@@ -45,7 +46,7 @@ def render():
         SELECT SUM(d.Amount) AS excise
         FROM TrVocDetail d
         JOIN TrVocHead h ON h.TransTypeID=d.TransTypeID AND h.VoucherNo=d.VoucherNo
-        JOIN MsAccountHead a ON a.AccHeadID = d.PartyID
+        JOIN MsAccountHead a ON a.AccHeadID = d.AccHeadID
         WHERE a.AccHeadName LIKE '%EXCISE DUTY%'
           AND d.DrCrIndicator = 'D'
           AND ISNULL(h.Cancelled,'N') <> 'Y'
@@ -55,7 +56,7 @@ def render():
         SELECT SUM(d.Amount) AS sales_scheme
         FROM TrVocDetail d
         JOIN TrVocHead h ON h.TransTypeID=d.TransTypeID AND h.VoucherNo=d.VoucherNo
-        JOIN MsAccountHead a ON a.AccHeadID = d.PartyID
+        JOIN MsAccountHead a ON a.AccHeadID = d.AccHeadID
         WHERE a.AccHeadName LIKE '%SALES SCHEME%'
           AND d.DrCrIndicator = 'C'
           AND ISNULL(h.Cancelled,'N') <> 'Y'
@@ -139,11 +140,11 @@ def render():
         SELECT
             YEAR(COALESCE(h.TPDate, h.VoucherDate)) AS yr,
             MONTH(COALESCE(h.TPDate, h.VoucherDate)) AS mo,
-            SUM(CASE WHEN d.PartyID='000004' AND d.DrCrIndicator='C' THEN d.Amount ELSE 0 END) AS revenue,
-            SUM(CASE WHEN d.PartyID='000005' AND d.DrCrIndicator='D' THEN d.Amount ELSE 0 END) AS cogs
+            SUM(CASE WHEN d.AccHeadID='000004' AND d.DrCrIndicator='C' THEN d.Amount ELSE 0 END) AS revenue,
+            SUM(CASE WHEN d.AccHeadID='000005' AND d.DrCrIndicator='D' THEN d.Amount ELSE 0 END) AS cogs
         FROM TrVocDetail d
         JOIN TrVocHead h ON h.TransTypeID=d.TransTypeID AND h.VoucherNo=d.VoucherNo
-        WHERE d.PartyID IN ('000004','000005')
+        WHERE d.AccHeadID IN ('000004','000005')
           AND ISNULL(h.Cancelled,'N') <> 'Y'
           {date_filter}
         GROUP BY YEAR(COALESCE(h.TPDate, h.VoucherDate)), MONTH(COALESCE(h.TPDate, h.VoucherDate))
