@@ -113,8 +113,8 @@ def render():
             highlight_overdue = st.checkbox("Highlight >90 days overdue", value=True)
 
         df_show = df_age[df_age["total"] >= min_outstanding].copy()
+        df_csv  = df_show.copy()
 
-        # Format amounts
         for col in ["d0_30", "d31_60", "d61_90", "d91_180", "d180_plus", "total"]:
             df_show[col] = df_show[col].apply(fmt_inr)
 
@@ -123,6 +123,13 @@ def render():
             "91-180 Days", ">180 Days", "Total"
         ]
         st.dataframe(df_show, use_container_width=True, hide_index=True)
+        st.download_button(
+            "⬇️ Download CSV",
+            data=df_csv.to_csv(index=False),
+            file_name="debtors_ageing.csv",
+            mime="text/csv",
+            key="da_dl_ageing",
+        )
 
     # ── Salesman-wise outstanding — net ledger balance per salesman ───────────
     st.divider()
@@ -145,7 +152,15 @@ def render():
                                   color_scale="Oranges",
                                   yaxis_title="₹ Crores"),
                         use_container_width=True, key="da_salesman")
-        df_sm_disp = df_sm[["salesman", "debtors", "outstanding"]].copy()
+        df_sm_csv  = df_sm[["salesman", "debtors", "outstanding"]].copy()
+        df_sm_disp = df_sm_csv.copy()
         df_sm_disp["outstanding"] = df_sm_disp["outstanding"].apply(fmt_inr)
         df_sm_disp.columns = ["Salesman", "Debtors", "Outstanding"]
         st.dataframe(df_sm_disp, use_container_width=True, hide_index=True)
+        st.download_button(
+            "⬇️ Download CSV",
+            data=df_sm_csv.to_csv(index=False),
+            file_name="salesman_outstanding.csv",
+            mime="text/csv",
+            key="da_dl_sman",
+        )
