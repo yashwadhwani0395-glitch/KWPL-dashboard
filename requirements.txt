@@ -1,8 +1,5 @@
-# Database
-pyodbc==5.2.0
-python-dotenv==1.1.0
-
-# Dashboard (Step 4 — not needed until then)
-streamlit==1.44.1
-pandas==2.2.3
-plotly==6.0.1
+streamlit>=1.44.1
+pandas>=2.2.3
+plotly>=6.0.1
+pymssql>=2.3.1
+python-dotenv>=1.1.0
