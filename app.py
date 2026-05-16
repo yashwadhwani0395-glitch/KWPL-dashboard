@@ -29,7 +29,7 @@ with st.sidebar:
         st.cache_data.clear()
         st.rerun()
 
-from pages import overview, sales, purchases_stock, debtors_ageing, creditors_ageing, cashflow_expenses, balance_sheet
+from pages import overview, sales, purchases_stock, debtors_ageing, creditors_ageing, cashflow_expenses, balance_sheet, formal_bs
 from pages import schema_explorer
 
 tabs = st.tabs([
@@ -40,6 +40,7 @@ tabs = st.tabs([
     "🏦 Creditors Ageing",
     "💸 Cash Flow & Expenses",
     "📋 Balance Sheet",
+    "📑 Formal Balance Sheet",
     "🔍 DB Explorer",
 ])
 
@@ -50,4 +51,5 @@ with tabs[3]: debtors_ageing.render()
 with tabs[4]: creditors_ageing.render()
 with tabs[5]: cashflow_expenses.render()
 with tabs[6]: balance_sheet.render()
-with tabs[7]: schema_explorer.render()
+with tabs[7]: formal_bs.render()
+with tabs[8]: schema_explorer.render()
